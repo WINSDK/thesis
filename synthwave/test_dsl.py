@@ -122,8 +122,7 @@ def test_partial_appl_simple():
     assert isinstance(partial_result, UOp)
     assert partial_result.op == Ops.Closure
     expr = UOp(Ops.Appl, [partial_expr, val(32)])
-    result = evaluate(expr)
-    assert result == 42
+    assert evaluate(expr) == 42
 
 def test_partial_appl_chain():
     # step1 = add 1         => closure
@@ -157,7 +156,7 @@ def test_map_add5():
         ]),
         val([1, 2, 3]),
     ])
-    assert [6, 7, 8], evaluate(expr)
+    assert evaluate(expr) == [6, 7, 8]
 
 def test_closure_call():
     inc = UOp(Ops.Closure, [
@@ -175,8 +174,31 @@ def test_closure_call():
     # 1. Wrap 5 as UOp(Ops.Val, [5])
     # 2. Form Appl(inc_func, ...)
     # 3. Evaluate it
-    result = inc(5)
-    assert result == 6, f"Expected 6, got {result}"
+    assert inc(5) == 6
+
+def test_shadowing():
+    # We define an expression that uses shadowing:
+    # (λx. ((λx. add(x 2)) mul(x 10))) 5
+    outer_lambda = UOp(Ops.Abstr, [
+        "x",
+        UOp(Ops.Appl, [
+            UOp(Ops.Abstr, [
+                "x",
+                UOp(Ops.Appl, [
+                    var("add"),
+                    var("x"),
+                    val(2),
+                ])
+            ]),
+            UOp(Ops.Appl, [
+                var("mul"),
+                var("x"),
+                val(10)
+            ])
+        ])
+    ])
+    expr = UOp(Ops.Appl, [outer_lambda, val(5)])
+    assert evaluate(expr) == 52
 
 def test_infer_val():
     # Val(42) -> Int

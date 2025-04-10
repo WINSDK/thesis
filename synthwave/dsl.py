@@ -55,11 +55,10 @@ class UOp():
 
 def external_fn(f):
     assert callable(f), "Not a valid python function"
-    fn_args = inspect.signature(f).parameters.keys()
-    params = ["anon_" + p for p in fn_args]
+    params = inspect.signature(f).parameters.keys()
     return UOp(
         Ops.Closure,
-        [*params, UOp(Ops.External, params + [f]), {}]
+        [*params, UOp(Ops.External, [*params, f]), {}]
     )
 
 def builtin_add(x: int, y: int) -> int:
@@ -77,14 +76,10 @@ BUILTINS = {
     "map": external_fn(builtin_map),
 }
 
-def evaluate(expr: UOp, env: Optional[Dict[str, UOp]]=None, depth=0):
+def evaluate(expr: UOp, env: Optional[Dict[str, UOp]]=None):
     assert isinstance(expr, UOp), f"Not an expr: {expr}"
-    if depth == 1000:
-        raise RecursionError("Evaluate max_depth=1000")
     if env is None:
         env = {}
-    def rec(x, env):
-        return evaluate(x, env, depth + 1)
     def lookup(varname):
         if varname in env:
             var = env[varname]
@@ -92,7 +87,7 @@ def evaluate(expr: UOp, env: Optional[Dict[str, UOp]]=None, depth=0):
             var = BUILTINS[varname]
         else:
             raise NameError(f"Unbound variable: {varname}")
-        return rec(var, env) if isinstance(var, UOp) else var
+        return evaluate(var, env) if isinstance(var, UOp) else var
     match expr.op:
         case Ops.Val:
             return expr.args[0]
@@ -104,8 +99,8 @@ def evaluate(expr: UOp, env: Optional[Dict[str, UOp]]=None, depth=0):
             return UOp(Ops.Closure, [*expr.args, env])
         case Ops.Appl:
             func, *args = expr.args
-            func = rec(func, env)
-            args = [rec(a, env) for a in args]
+            func = evaluate(func, env)
+            args = [evaluate(a, env) for a in args]
             while args:
                 if not (isinstance(func, UOp) and func.op == Ops.Closure):
                     raise TypeError(f"Cannot call a non-closure: {func}")
@@ -124,12 +119,12 @@ def evaluate(expr: UOp, env: Optional[Dict[str, UOp]]=None, depth=0):
                 else:
                     # Full application or over-applied 
                     closure_env = apply(closure_env, params, args[:len(params)])
-                    func = rec(body, closure_env)
+                    func = evaluate(body, closure_env)
                     args = args[len(params):]
             return func
         case Ops.External:
             *params, body = expr.args
-            pv = {p.lstrip("anon_"): lookup(p) for p in params}
+            pv = {p: lookup(p) for p in params}
             try:
                 return body(**pv)
             except Exception as e:
@@ -312,7 +307,7 @@ def _infer(expr: UOp, env: Dict[str, Type], subst: Dict[TVar, Type]) -> Tuple[Ty
             assert len(params_ty) == len(params) + 1, \
                    "All external functions must fully typed, including their return type"
             body_ty = var_ty(params_ty["return"])
-            params_ty = [var_ty(params_ty[p.lstrip("anon_")]) for p in params]
+            params_ty = [var_ty(params_ty[p]) for p in params]
             ty = TArrow.of_list(params_ty, body_ty)
             return (ty, subst)
 
