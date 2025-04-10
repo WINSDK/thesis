@@ -1,5 +1,6 @@
 import pytest
 from synthwave.dsl import UOp, Ops, evaluate
+from synthwave.dsl import TInt, TArrow, infer
 
 
 def val(x):
@@ -41,7 +42,7 @@ def test_abstr_single():
     closure = evaluate(expr)
     assert isinstance(closure, UOp)
     assert closure.op == Ops.Closure
-    assert closure.args[0] == ["x"]          # params
+    assert closure.args[0] == "x"            # param 1
     assert closure.args[1] == expr.args[1]   # body
     assert closure.args[2] == {}             # captured env
 
@@ -65,7 +66,8 @@ def test_abstr_multi():
     closure = evaluate(expr)
     assert isinstance(closure, UOp)
     assert closure.op == Ops.Closure
-    assert closure.args[0] == ["x", "y"]
+    assert closure.args[0] == "x"
+    assert closure.args[1] == "y"
 
 
 def test_appl_multi():
@@ -141,3 +143,120 @@ def test_partial_appl_chain():
     assert closure_step3.op == Ops.Closure
     step4 = UOp(Ops.Appl, [step3, val(39)])
     assert evaluate(step4) == 42
+
+def test_infer_val():
+    # Val(42) -> Int
+    expr = val(42)
+    ty = infer(expr)
+    assert isinstance(ty, TInt), f"Expected TInt, got {ty}"
+
+def test_infer_abstr_single():
+    # λx. x + 1 => Int -> Int
+    # Because x must be an Int to do (x + 1).
+    expr = UOp(Ops.Abstr, [
+        "x",
+        UOp(Ops.Appl, [var("add"), var("x"), val(1)])
+    ])
+    ty = infer(expr)
+    assert isinstance(ty, TArrow), f"Expected TArrow, got {ty}"
+    assert isinstance(ty.param, TInt), f"Expected param TInt, got {ty.param}"
+    assert isinstance(ty.result, TInt), f"Expected result TInt, got {ty.result}"
+
+def test_infer_appl_single():
+    # (λx. x+1) 41 => Int
+    func = UOp(Ops.Abstr, [
+        "x",
+        UOp(Ops.Appl, [
+            var("add"),
+            var("x"),
+            val(1)
+        ])
+    ])
+    expr = UOp(Ops.Appl, [func, val(41)])
+    ty = infer(expr)
+    assert isinstance(ty, TInt), f"Expected TInt, got {ty}"
+
+def test_infer_abstr_multi():
+    # λx y. x + y => Int -> Int -> Int
+    expr = UOp(Ops.Abstr, [
+        "x",
+        "y",
+        UOp(Ops.Appl, [var("add"), var("x"), var("y")])
+    ])
+    ty = infer(expr)
+    assert isinstance(ty, TArrow), f"Expected TArrow, got {ty}"
+    assert isinstance(ty.param, TInt), f"Expected first param TInt, got {ty.param}"
+    rty = ty.result
+    assert isinstance(rty, TArrow), f"Expected TArrow, got {rty}"
+    assert isinstance(rty.param, TInt), f"Expected second param TInt, got {rty.param}"
+    assert isinstance(rty.result, TInt), f"Expected result TInt, got {rty.result}"
+
+def test_infer_appl_multi():
+    # (λx y. x * y) 6 7 => Int
+    func = UOp(Ops.Abstr, [
+        "x",
+        "y",
+        UOp(Ops.Appl, [
+            var("mul"),
+            var("x"),
+            var("y"),
+        ])
+    ])
+    expr = UOp(Ops.Appl, [
+        func,
+        val(6),
+        val(7),
+    ])
+    ty = infer(expr)
+    assert isinstance(ty, TInt), f"Expected TInt, got {ty}"
+
+def test_infer_nested():
+    # (λx y. (λz. x + z) (y * 2)) 5 10 => int
+    # Inside:
+    #    x y => body is (λz. x+z) y*2
+    #    y*2 is int
+    #    so we pass that to λz. x+z => x z are int => int
+    # Overall => int
+    outer = UOp(Ops.Abstr, [
+        "x",
+        "y",
+        UOp(Ops.Appl, [
+            UOp(Ops.Abstr, [
+                "z",
+                UOp(Ops.Appl, [
+                    var("add"),
+                    var("x"),
+                    var("z"),
+                ])
+            ]),
+            UOp(Ops.Appl, [
+                var("mul"),
+                var("y"),
+                val(2),
+            ])
+        ])
+    ])
+    call = UOp(Ops.Appl, [outer, val(5), val(10)])
+    ty = infer(call)
+    assert isinstance(ty, TInt), f"Expected TInt, got {ty}"
+
+def test_infer_type_error():
+    # A mismatch: Add(Val(5), λx. x+1)
+    # => We unify left side as int, right side as ? => but it becomes a function type
+    # => Should raise a unification TypeError
+    expr = UOp(Ops.Appl, [
+        var("add"),
+        val(5),
+        UOp(Ops.Abstr, [
+            "x",
+            UOp(Ops.Appl, [
+                var("add"),
+                var("x"),
+                val(1),
+            ])
+        ])
+    ])
+    with pytest.raises(Exception) as excinfo:
+        infer(expr)
+    assert "unify" in str(excinfo.value) or "Cannot unify" in str(excinfo.value), \
+        f"Expected unification error message, got {excinfo.value}"
