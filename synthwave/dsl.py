@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from typing import Union, Any, Dict, Optional, Tuple
 import typing
 from enum import auto, IntEnum
@@ -5,9 +6,6 @@ from dataclasses import dataclass
 import inspect
 
 class ExternalCall(Exception):
-    pass
-
-class TypeErrorUnify(Exception):
     pass
 
 class Ops(IntEnum):
@@ -31,10 +29,29 @@ class UOp():
     def __repr__(self):
         op = self.name if len(self.name) > 0 else self.op.name
         if isinstance(self.args, list):
-            args = ", ".join(map(str, self.args))
+            def fmt_arg(arg):
+                if callable(arg) and not isinstance(arg, UOp):
+                    return arg.__name__
+                else:
+                    return str(arg)
+            args = ", ".join(map(fmt_arg, self.args))
             return f"{op}({args})"
         else:
             return f"V({self.args})"
+
+    def __call__(self, *args):
+        match self.op:
+            case Ops.Closure:
+                cargs = []
+                for a in args:
+                    # We need to wrap literals in a Ops.Val but
+                    # still ignore uop's
+                    cargs.append(a if isinstance(a, UOp) else UOp(Ops.Val, [a]))
+                return evaluate(UOp(Ops.Appl, [self, *cargs]))
+            case Ops.External:
+                return self.args[-1](*args)
+            case _:
+                raise ExternalCall(f"Can't call uop: {self}")
 
 def external_fn(f):
     assert callable(f), "Not a valid python function"
@@ -51,9 +68,13 @@ def builtin_add(x: int, y: int) -> int:
 def builtin_mul(x: int, y: int) -> int:
     return x * y
 
+def builtin_map(f: Callable[[int], int], lst: list[int]) -> list[int]:
+    return [f(x) for x in lst]
+
 BUILTINS = {
     "add": external_fn(builtin_add),
     "mul": external_fn(builtin_mul),
+    "map": external_fn(builtin_map),
 }
 
 def evaluate(expr: UOp, env: Optional[Dict[str, UOp]]=None, depth=0):
@@ -108,12 +129,12 @@ def evaluate(expr: UOp, env: Optional[Dict[str, UOp]]=None, depth=0):
             return func
         case Ops.External:
             *params, body = expr.args
-            pv = {str.lstrip(p, "anon_"):lookup(p) for p in params}
+            pv = {p.lstrip("anon_"): lookup(p) for p in params}
             try:
                 return body(**pv)
             except Exception as e:
                 params = ", ".join(map(str, pv.values()))
-                raise ExternalCall(f"fn({params})") from e
+                raise ExternalCall(f"{body.__name__}({params})") from e
 
 @dataclass
 class TInt:
@@ -135,6 +156,14 @@ class TArrow:
     def __repr__(self):
         return str(self.param) + " -> " + str(self.result)
 
+    @staticmethod
+    def of_list(params_ty: list["Type"], body_ty: "Type"):
+        """Rfold for function types param1 -> param2 -> ... -> body"""
+        func_ty = body_ty
+        for pt in reversed(params_ty):
+            func_ty = TArrow(pt, func_ty)
+        return func_ty
+
 @dataclass(frozen=True)
 class TVar:
     name: str
@@ -155,14 +184,15 @@ def apply_subst(ty: Type, subst: Dict[TVar, Type]) -> Type:
     else:
         return ty
 
-def compose_subst(s1: Dict[TVar, Type], s2: Dict[TVar, Type]) -> Dict[TVar, Type]:
-    """Compose s2 with s1: apply s2 to all of s1's mappings"""
-    # First, apply s2 to s1's range
-    new_map = { tv: apply_subst(ty, s2) for tv, ty in s1.items() }
-    # Then add s2's own bindings
-    for tv, ty in s2.items():
-        new_map[tv] = ty
-    return new_map
+def occurs_in_type(tv: TVar, ty: Type, subst: Dict[TVar, Type]) -> bool:
+    ty = apply_subst(ty, subst)
+    if ty == tv:
+        return True
+    elif isinstance(ty, TArrow):
+        return occurs_in_type(tv, ty.param, subst) or \
+               occurs_in_type(tv, ty.result, subst)
+    else:
+        return False
 
 def var_bind(tv: TVar, ty: Type, subst: Dict[TVar, Type]) -> Dict[TVar, Type]:
     """Bind the type var 'tv' to type 'ty' if allowed,"""
@@ -170,9 +200,9 @@ def var_bind(tv: TVar, ty: Type, subst: Dict[TVar, Type]) -> Dict[TVar, Type]:
         return subst
     # Cannot bind a type variable to a type that contains it
     if occurs_in_type(tv, ty, subst):
-        raise TypeErrorUnify(f"Occurs check fails: {tv} in {ty}")
+        raise TypeError(f"Occurs check fails: {tv} in {ty}")
     # Override the subst
-    new_subst = dict(subst)
+    new_subst = subst.copy()
     new_subst[tv] = ty
     return new_subst
 
@@ -186,27 +216,15 @@ def unify(t1: Type, t2: Type, subst: Dict[TVar, Type]) -> Dict[TVar, Type]:
         return var_bind(t1, t2, subst)
     elif isinstance(t2, TVar):
         return var_bind(t2, t1, subst)
-    elif isinstance(t1, TInt) and isinstance(t2, TInt):
-        # Already the same
+    # This must be manually modified for each new base type
+    elif any(isinstance(t1, t) and isinstance(t2, t) for t in [TInt, TList]):
         return subst
     elif isinstance(t1, TArrow) and isinstance(t2, TArrow):
         # unify param, then unify result
         subst2 = unify(t1.param, t2.param, subst)
         return unify(t1.result, t2.result, subst2)
     else:
-        # e.g. TArrow != TInt or mismatch
-        raise TypeErrorUnify(f"Cannot unify {t1} with {t2}")
-
-def occurs_in_type(tv: TVar, ty: Type, subst: Dict[TVar, Type]) -> bool:
-    ty = apply_subst(ty, subst)
-    if ty == tv:
-        return True
-    elif isinstance(ty, TArrow):
-        return occurs_in_type(tv, ty.param, subst) or \
-               occurs_in_type(tv, ty.result, subst)
-    else:
-        return False
-
+        raise TypeError(f"Cannot unify {t1} with {t2}")
 
 def fresh_type_var(prefix="a", counter=[0]) -> TVar:
     name = f"{prefix}{counter[0]}"
@@ -216,13 +234,20 @@ def fresh_type_var(prefix="a", counter=[0]) -> TVar:
 def _infer(expr: UOp, env: Dict[str, Type], subst: Dict[TVar, Type]) -> Tuple[Type, Dict[TVar, Type]]:
     assert isinstance(expr, UOp), f"Not an expr: {expr}"
     def var_ty(var):
-        # This probably requires more checks.
+        varname = var.__name__
         if var is int:
             return TInt()
+        elif var is list or var is Callable:
+            raise TypeError(f"Type {varname} is missing type spec")
         elif typing.get_origin(var) is list:
-            return TList(elems=typing.get_args(var)[0])
+            elems = typing.get_args(var)[0]
+            return TList(var_ty(elems))
+        elif typing.get_origin(var) is Callable:
+            params_ty, body_ty = typing.get_args(var)
+            params_ty = [var_ty(p) for p in params_ty]
+            return TArrow.of_list(params_ty, var_ty(body_ty))
         else:
-            return TVar(var.__name__)
+            raise TypeError(f"Type {varname} isn't supported (yet)")
     def lookup(varname):
         if varname in env:
             # The type in env might be partially substituted
@@ -236,6 +261,11 @@ def _infer(expr: UOp, env: Dict[str, Type], subst: Dict[TVar, Type]) -> Tuple[Ty
     match expr.op:
         case Ops.Val:
             py_ty = type(expr.args[0])
+            # Special case for list's, so that we can infer the type of
+            # A value such as: Val([1, 2, 3]) => Int List
+            if py_ty is list and len(expr.args[0]) > 0:
+                elem = expr.args[0][0]
+                return (var_ty(list[type(elem)]), subst)
             return (var_ty(py_ty), subst)
         case Ops.Var:
             return lookup(expr.args[0])
@@ -247,18 +277,15 @@ def _infer(expr: UOp, env: Dict[str, Type], subst: Dict[TVar, Type]) -> Tuple[Ty
             # We create a fresh type variable for each param
             # or you might do something fancy if param type is annotated
             env = env.copy()
-            param_types = []
+            params_ty = []
             for p in params:
                 tv = fresh_type_var()
                 env[p] = tv
-                param_types.append(tv)
+                params_ty.append(tv)
             # Infer body with those param types in env
             (body_ty, s1) = _infer(body, env, subst)
-            # Rfold for function types param1 -> param2 -> ... -> body 
-            func_ty = body_ty
-            for pt in reversed(param_types):
-                func_ty = TArrow(pt, func_ty)
-            return (func_ty, s1)
+            ty = TArrow.of_list(params_ty, body_ty)
+            return (ty, s1)
         case Ops.Appl:
             func, *args = expr.args
             # 1. Infer the type of func
@@ -268,7 +295,7 @@ def _infer(expr: UOp, env: Dict[str, Type], subst: Dict[TVar, Type]) -> Tuple[Ty
             cur_subst = s1
             cur_func_ty = func_ty
             for arg in args:
-                # The function must be an arrow: TArrow(param_type, result_type)
+                # The function must be an arrow: param_type -> result_type
                 param_ty = fresh_type_var()
                 result_ty = fresh_type_var()
                 cur_subst = unify(cur_func_ty, TArrow(param_ty, result_ty), cur_subst)
@@ -281,15 +308,13 @@ def _infer(expr: UOp, env: Dict[str, Type], subst: Dict[TVar, Type]) -> Tuple[Ty
             return (apply_subst(cur_func_ty, cur_subst), cur_subst)
         case Ops.External:
             *params, body = expr.args
-            param_types = body.__annotations__
-            assert len(param_types) == len(params) + 1, \
+            params_ty = body.__annotations__
+            assert len(params_ty) == len(params) + 1, \
                    "All external functions must fully typed, including their return type"
-            func_ty = var_ty(param_types["return"])
-            for pt_idx in reversed(range(len(params))):
-                p = str.lstrip(params[pt_idx], "anon_")
-                pt = var_ty(param_types[p])
-                func_ty = TArrow(pt, func_ty)
-            return (func_ty, subst)
+            body_ty = var_ty(params_ty["return"])
+            params_ty = [var_ty(params_ty[p.lstrip("anon_")]) for p in params]
+            ty = TArrow.of_list(params_ty, body_ty)
+            return (ty, subst)
 
 def infer(expr: UOp) -> Type:
     ty, s = _infer(expr, {}, {})

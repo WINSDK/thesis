@@ -1,6 +1,6 @@
 import pytest
 from synthwave.dsl import UOp, Ops, evaluate
-from synthwave.dsl import TInt, TArrow, infer
+from synthwave.dsl import TInt, TList, TArrow, infer
 
 
 def val(x):
@@ -144,6 +144,40 @@ def test_partial_appl_chain():
     step4 = UOp(Ops.Appl, [step3, val(39)])
     assert evaluate(step4) == 42
 
+def test_map_add5():
+    # map (add 5) [1,2,3] => Int -> Int
+    # Partially applying `add` with 5
+    expr = UOp(Ops.Appl, [
+        UOp(Ops.Appl, [
+            var("map"),
+            UOp(Ops.Appl, [
+                var("add"),
+                val(5),
+            ])
+        ]),
+        val([1, 2, 3]),
+    ])
+    assert [6, 7, 8], evaluate(expr)
+
+def test_closure_call():
+    inc = UOp(Ops.Closure, [
+        UOp(Ops.Abstr, [
+            "x",
+            UOp(Ops.Appl, [
+                var("add"),
+                var("x"),
+                val(1)
+            ])
+        ]),
+        {}, # (no free variables)
+    ])
+    # The uop.__call__(5) will:
+    # 1. Wrap 5 as UOp(Ops.Val, [5])
+    # 2. Form Appl(inc_func, ...)
+    # 3. Evaluate it
+    result = inc(5)
+    assert result == 6, f"Expected 6, got {result}"
+
 def test_infer_val():
     # Val(42) -> Int
     expr = val(42)
@@ -260,3 +294,20 @@ def test_infer_type_error():
         infer(expr)
     assert "unify" in str(excinfo.value) or "Cannot unify" in str(excinfo.value), \
         f"Expected unification error message, got {excinfo.value}"
+
+def test_infer_map_add5():
+    # map (add 5) [1,2,3] => Int List
+    # Partially applying `add` with 5
+    expr = UOp(Ops.Appl, [
+        UOp(Ops.Appl, [
+            var("map"),
+            UOp(Ops.Appl, [
+                var("add"),
+                val(5),
+            ])
+        ]),
+        val([1, 2, 3]),
+    ])
+    ty = infer(expr)
+    assert isinstance(ty, TList), f"Expected list type, got {ty}"
+    assert isinstance(ty.elems, TInt), f"Expected list of ints, got {ty.elems}"
