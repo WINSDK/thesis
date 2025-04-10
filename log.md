@@ -62,10 +62,7 @@ Read that weak-head normal form is the most commonly used in real-world compiler
 
 # Index
 
-prereq:
-* Find libraries that do constrained generation for cfg
-* Find existing papers that do what we want to do
-* Ask access for A100 server (find who to ask for the server too, straight away)
+### Naive notes
 
 1. Phase 1 just get it to generate valid lambda syntax
 2. Randomly (maybe not so random?) generate lambda expressions with input / output pairs
@@ -78,9 +75,11 @@ prereq:
 * https://faustocarcassi.com/arc-course/labs/lab3.html
 
 ### Plan
+
 * Instead of single inference, try cons@64 (using beam search).
 * Maybe second pass variable renaming for readability?
 * Qwen2.5-14B-Instruct-bnb-4bit base seems like the SOTA in our case.
+* https://huggingface.co/agentica-org/DeepCoder-14B-Preview
 * Real SOTA might be R1 Qwen distilled but that requires CoT.
 * Generate hundred's of thousands of synthetic examples  
 * What the hell, generate outwards the redex's?
@@ -118,13 +117,18 @@ Rewards:
 * Syntax
 * Valid Mapping
 * Fully simplified (might not be the right approach)
-* How close it is to the correct function?
+* How close it is to the correct function? (probably a bad idea)
+* Length (conditional on correctness)
 
 ### RAG
 
 Get the model to output a <query-rag>function to reverse list</query-rag>
 special token sequence. You can do this by augmenting the training data
 for finetuning.
+
+### Tokenizer
+
+* Micro optimization: Capitalizing identifiers might help as these are more common 
 
 #### Augmentation
 
@@ -158,7 +162,7 @@ Smyth (https://arxiv.org/pdf/1911.00583):
 * Bidirectional evaluation
 
 Scrybe (https://arxiv.org/pdf/2210.13873)
-* Not yet read
+*
 
 Guiding Enumerative Program Synthesis with Large Language Models
 
@@ -174,6 +178,9 @@ Type-Driving program synthesis (https://people.csail.mit.edu/polikarn/publicatio
 Lambdabeam (https://arxiv.org/pdf/2306.02049):
 * 
 
+Abstractbeam (https://arxiv.org/pdf/2405.17514):
+* Improvement on top of lambdabeam
+
 MCTSr: mathematics as a blackbox
 
 Winner of arc challenge (https://github.com/da-fr/arc-prize-2024/blob/main/the_architects.pdf):
@@ -186,7 +193,7 @@ Winner of arc challenge (https://github.com/da-fr/arc-prize-2024/blob/main/the_a
   - Mistral-NeMo-Minitron-8B-Base
   - Uncensored Llama-3.2-3B-instruct
 
-### Day 4: ???
+### Day 4: More random research
 
 LILO (https://arxiv.org/pdf/2310.19791):
 1. Uses a combination of LLM-guided search and Enumerative
@@ -194,3 +201,81 @@ LILO (https://arxiv.org/pdf/2310.19791):
 3. Documents the now refactored intermediate functions
 4 (pt1). Rewrite original (before compression) program using these functions
 4 (pt2). Makes the model learn about these new functions?
+* Important info
+  * A.1 LLM SOLVER PROMPT
+  * REGEX library
+
+### Day 5
+
+* Distill chatgpt - this is a good way to get the model going
+
+#### Workflow (step by step)
+
+Compile a set of primitive functions that are passed to `eval`.
+
+Model A (S1):
+```
+<prompt>
+  [3, 9, 1, 5] -> [9, 5, 3, 1]
+  [1, 3] -> [3, 1]
+  [30, 10, 20] -> [30, 20, 10]
+<prompt/>
+<response>
+  λx. reverse(sort(x))
+<response/>
+```
+
+* Execute eval(response, { here_goes_allowed_funcs })
+* Exception: sort does not exist
+
+Model B (S2):
+```
+<prompt>
+  <context>
+  λx. reverse(sort(x))
+  <context/>
+  You are a lambda calculus wizard, living in the world of lambdas.
+  We have an incomplete expression with a missing the defintion of `sort`.
+  Generate an expression for the function `sort`:
+<prompt/>
+<response>
+  sort = λl. (isNil l) l (insert (head l) (sort (tail l)))
+<response/>
+```
+
+* Execute eval(response, { here_goes_allowed_funcs })
+* Exception: insert does not exist
+
+Model B (S3):
+```
+<prompt>
+  <context>
+  λl. (isNil l) l (insert (head l) (sort (tail l)))
+  <context/>
+  You are a lambda calculus wizard, living in the world of lambdas.
+  We have an incomplete expression with a missing the defintion of `insert`.
+  Generate an expression for the function `insert`:
+<prompt/>
+<response>
+  insert = λn. λl. (isNil l)
+                   (cons n nil)
+                   ((leq? n (head l))
+                     (cons n l)
+                     (cons (head l) (insert n (tail l))))
+<response/>
+```
+* Execute eval(response, { here_goes_allowed_funcs })
+* Success (recurse back to previous step)
+
+... Keep executing until we have a complete initial expression
+
+An interesting issue: we might just end up *stuck*. This happens when we
+encounter a cyclical dependency. The chain `odd -> Lx.not (even x) -> Lx.not (not (odd x))`
+is an example of such a dependency. To prevent this, we need to maintain
+a record of functions being generated during recursion and exclude these
+from subsequent sampling.
+
+We probably also want to annotate these functions with extra context. A simple
+solution is generating docstrings for each generated sub-expression. A more
+complicated but probably necessary addition relies on computing the type of each
+expression.
