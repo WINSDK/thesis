@@ -1,4 +1,4 @@
-from typing import Union, Any, Dict, Optional
+from typing import Union, Any, Dict, Optional, Tuple
 import typing
 from enum import auto, IntEnum
 from dataclasses import dataclass
@@ -142,7 +142,7 @@ class TVar:
     def __repr__(self):
         return self.name
 
-Type = Union[TInt, TVar, TArrow]
+Type = Union[TInt, TList, TVar, TArrow]
 
 def apply_subst(ty: Type, subst: Dict[TVar, Type]) -> Type:
     if isinstance(ty, TVar) and ty in subst:
@@ -213,7 +213,7 @@ def fresh_type_var(prefix="a", counter=[0]) -> TVar:
     counter[0] += 1
     return TVar(name)
 
-def _infer(expr: UOp, env: Dict[str, Type], subst: Dict[TVar, Type]):
+def _infer(expr: UOp, env: Dict[str, Type], subst: Dict[TVar, Type]) -> Tuple[Type, Dict[TVar, Type]]:
     assert isinstance(expr, UOp), f"Not an expr: {expr}"
     def var_ty(var):
         # This probably requires more checks.
@@ -226,7 +226,7 @@ def _infer(expr: UOp, env: Dict[str, Type], subst: Dict[TVar, Type]):
     def lookup(varname):
         if varname in env:
             # The type in env might be partially substituted
-            return apply_subst(env[varname], subst)
+            return (apply_subst(env[varname], subst), subst)
         elif varname in BUILTINS:
             # Built-in functions are always external and therefore
             # don't require substitution
@@ -238,12 +238,12 @@ def _infer(expr: UOp, env: Dict[str, Type], subst: Dict[TVar, Type]):
             py_ty = type(expr.args[0])
             return (var_ty(py_ty), subst)
         case Ops.Var:
-            return (lookup(expr.args[0]), subst)
+            return lookup(expr.args[0])
         case Ops.Closure:
             *_, body, _ = expr.args
             return _infer(body, env, subst)
         case Ops.Abstr:
-            params, body = expr.args[:-1], expr.args[-1]
+            *params, body = expr.args
             # We create a fresh type variable for each param
             # or you might do something fancy if param type is annotated
             env = env.copy()
@@ -289,8 +289,8 @@ def _infer(expr: UOp, env: Dict[str, Type], subst: Dict[TVar, Type]):
                 p = str.lstrip(params[pt_idx], "anon_")
                 pt = var_ty(param_types[p])
                 func_ty = TArrow(pt, func_ty)
-            return func_ty
+            return (func_ty, subst)
 
-def infer(expr: UOp):
+def infer(expr: UOp) -> Type:
     ty, s = _infer(expr, {}, {})
     return apply_subst(ty, s)
