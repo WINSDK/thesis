@@ -35,10 +35,6 @@ class UOp():
             return f"{op}({args})"
         else:
             return f"V({self.args})"
-    
-    def swap(self, **kwargs):
-        new = (kwargs.pop("op", self.op), kwargs.pop("args", self.args), kwargs.pop("name", self.args))
-        return UOp(*new)
 
 def external_fn(f):
     assert callable(f), "Not a valid python function"
@@ -60,8 +56,8 @@ BUILTINS = {
     "mul": external_fn(builtin_mul),
 }
 
-def evaluate(uop: UOp, env: Optional[Dict[str, UOp]]=None, depth=0):
-    assert isinstance(uop, UOp), f"Not an expr: {uop}"
+def evaluate(expr: UOp, env: Optional[Dict[str, UOp]]=None, depth=0):
+    assert isinstance(expr, UOp), f"Not an expr: {expr}"
     if depth == 1000:
         raise RecursionError("Evaluate max_depth=1000")
     if env is None:
@@ -76,18 +72,17 @@ def evaluate(uop: UOp, env: Optional[Dict[str, UOp]]=None, depth=0):
         else:
             raise NameError(f"Unbound variable: {varname}")
         return rec(var, env) if isinstance(var, UOp) else var
-    args = uop.args
-    match uop.op:
+    match expr.op:
         case Ops.Val:
-            return args[0]
+            return expr.args[0]
         case Ops.Closure:
-            return uop
+            return expr
         case Ops.Var:
-            return lookup(args[0])
+            return lookup(expr.args[0])
         case Ops.Abstr:
-            return UOp(Ops.Closure, [*args, env])
+            return UOp(Ops.Closure, [*expr.args, env])
         case Ops.Appl:
-            func, *args = args
+            func, *args = expr.args
             func = rec(func, env)
             args = [rec(a, env) for a in args]
             while args:
@@ -112,7 +107,7 @@ def evaluate(uop: UOp, env: Optional[Dict[str, UOp]]=None, depth=0):
                     args = args[len(params):]
             return func
         case Ops.External:
-            *params, body = args
+            *params, body = expr.args
             pv = {str.lstrip(p, "anon_"):lookup(p) for p in params}
             try:
                 return body(**pv)
@@ -273,7 +268,7 @@ def _infer(expr: UOp, env: Dict[str, Type], subst: Dict[TVar, Type]):
             cur_subst = s1
             cur_func_ty = func_ty
             for arg in args:
-                # The function must be an arrow: TArrow(paramType, resultType)
+                # The function must be an arrow: TArrow(param_type, result_type)
                 param_ty = fresh_type_var()
                 result_ty = fresh_type_var()
                 cur_subst = unify(cur_func_ty, TArrow(param_ty, result_ty), cur_subst)
@@ -282,7 +277,7 @@ def _infer(expr: UOp, env: Dict[str, Type], subst: Dict[TVar, Type]):
                 # Unify arg type with param
                 cur_subst = unify(arg_ty, param_ty, cur_subst)
                 cur_func_ty = result_ty
-            # after applying all arguments, cur_func_ty is the final type of the application
+            # After applying all arguments, cur_func_ty is the final type of the application
             return (apply_subst(cur_func_ty, cur_subst), cur_subst)
         case Ops.External:
             *params, body = expr.args
