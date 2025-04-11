@@ -43,6 +43,7 @@ def parse_args():
                     raise argparse.ArgumentTypeError("Expected a boolean value (true/false)")
             ty = s2b
         parser.add_argument(f"--{k}", type=ty, nargs='?', default=v)
+    parser.add_argument("--repl", action="store_true")
     return parser.parse_args()
 
 def train_model():
@@ -159,7 +160,20 @@ def train_model():
         raise NotImplementedError
 
 def main():
-    train_model()
+    if ARGS.repl:
+        from synthwave.dsl import parse, evaluate
+        while True:
+            str = input("> ").strip()
+            if len(str) == 0:
+                continue
+            try:
+                expr = parse(str)
+                result = evaluate(expr)
+                print(f"  => {expr}\n    => {result}")
+            except Exception as e:
+                print(e)
+    else:
+        train_model()
 
 
 if __name__ == "__main__":
