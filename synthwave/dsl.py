@@ -1,9 +1,10 @@
 from collections.abc import Callable
 from typing import Union, Any, Dict, Optional, Tuple
-import typing
 from enum import auto, IntEnum
 from dataclasses import dataclass
+import typing
 import inspect
+import re
 
 class ExternalCall(Exception):
     pass
@@ -13,7 +14,7 @@ class Ops(IntEnum):
     Var   = auto()  
     # Application (M N): [body, param1, param2, ..]
     Appl = auto()
-    # Expression (λx.M): [arg1, arg2, .., body]
+    # Abstraction (λx.M): [arg1, arg2, .., body]
     Abstr = auto() 
     # Context-specific functions: [args1, args2, .., body, env]
     Closure = auto()
@@ -24,21 +25,22 @@ class Ops(IntEnum):
 class UOp():
     op: Ops
     args: list[Any]
-    name: str = ""
 
     def __repr__(self):
-        op = self.name if len(self.name) > 0 else self.op.name
-        if isinstance(self.args, list):
-            def fmt_arg(arg):
-                if callable(arg) and not isinstance(arg, UOp):
-                    return arg.__name__
-                else:
-                    return str(arg)
-            args = ", ".join(map(fmt_arg, self.args))
-            return f"{op}({args})"
-        else:
-            return f"V({self.args})"
+        if self.op == Ops.Var or self.op == Ops.Val:
+            return str(self.args[0])
+        def fmt_arg(arg):
+            if not isinstance(arg, UOp) and callable(arg):
+                return arg.__name__
+            else:
+                return str(arg)
+        args = ", ".join(map(fmt_arg, self.args))
+        return f"{self.op.name}({args})"
 
+    # This is technically not always correct, example:
+    # => map 1 (map add [1,2 ,3])
+    #   => builtin_map(1, [Closure(y, External(x, y, builtin_add), {'x': 1}) ..
+    # Expected => [2, 3, 4]
     def __call__(self, *args):
         match self.op:
             case Ops.Closure:
@@ -48,8 +50,8 @@ class UOp():
                     # still ignore uop's
                     cargs.append(a if isinstance(a, UOp) else UOp(Ops.Val, [a]))
                 return evaluate(UOp(Ops.Appl, [self, *cargs]))
-            case Ops.External:
-                return self.args[-1](*args)
+            case Ops.Var:
+                return evaluate(self)(*args)
             case _:
                 raise ExternalCall(f"Can't call uop: {self}")
 
@@ -70,10 +72,30 @@ def builtin_mul(x: int, y: int) -> int:
 def builtin_map(f: Callable[[int], int], lst: list[int]) -> list[int]:
     return [f(x) for x in lst]
 
+def builtin_cons(x: int, xs: list[int]) -> list[int]:
+    return [x] + xs
+
+def builtin_head(xs: list[int]) -> int:
+    return xs[0]
+
+def builtin_tail(xs: list[int]) -> list[int]:
+    return xs[1:]
+
+def builtin_append(xs: list[int], x: int) -> list[int]:
+    return xs + [x]
+
+def builtin_leq(a: int, b: int) -> bool:
+    return a <= b
+
 BUILTINS = {
     "add": external_fn(builtin_add),
     "mul": external_fn(builtin_mul),
     "map": external_fn(builtin_map),
+    "cons": external_fn(builtin_cons),
+    "head": external_fn(builtin_head),
+    "tail": external_fn(builtin_tail),
+    "append": external_fn(builtin_append),
+    "leq?": external_fn(builtin_leq),
 }
 
 def evaluate(expr: UOp, env: Optional[Dict[str, UOp]]=None):
@@ -136,6 +158,11 @@ class TInt:
     def __repr__(self):
         return "Int"
 
+@dataclass
+class TBool:
+    def __repr__(self):
+        return "Bool"
+
 @dataclass(frozen=True)
 class TList:
     elems: "Type"
@@ -166,7 +193,8 @@ class TVar:
     def __repr__(self):
         return self.name
 
-Type = Union[TInt, TList, TVar, TArrow]
+Type = Union[TInt, TBool, TList, TVar, TArrow]
+PRIMITIVES = (TInt, TBool, TList)
 
 def apply_subst(ty: Type, subst: Dict[TVar, Type]) -> Type:
     if isinstance(ty, TVar) and ty in subst:
@@ -212,7 +240,7 @@ def unify(t1: Type, t2: Type, subst: Dict[TVar, Type]) -> Dict[TVar, Type]:
     elif isinstance(t2, TVar):
         return var_bind(t2, t1, subst)
     # This must be manually modified for each new base type
-    elif any(isinstance(t1, t) and isinstance(t2, t) for t in [TInt, TList]):
+    elif any(isinstance(t1, t) and isinstance(t2, t) for t in PRIMITIVES):
         return subst
     elif isinstance(t1, TArrow) and isinstance(t2, TArrow):
         # unify param, then unify result
@@ -232,6 +260,8 @@ def _infer(expr: UOp, env: Dict[str, Type], subst: Dict[TVar, Type]) -> Tuple[Ty
         varname = var.__name__
         if var is int:
             return TInt()
+        if var is bool:
+            return TBool()
         elif var is list or var is Callable:
             raise TypeError(f"Type {varname} is missing type spec")
         elif typing.get_origin(var) is list:
@@ -314,3 +344,146 @@ def _infer(expr: UOp, env: Dict[str, Type], subst: Dict[TVar, Type]) -> Tuple[Ty
 def infer(expr: UOp) -> Type:
     ty, s = _infer(expr, {}, {})
     return apply_subst(ty, s)
+
+ATOMS = ("INT", "BOOL", "IDENT", "LPAREN", "LBRACKET", "LAMBDA")
+TOKEN_REGEX = r"""
+(?P<LAMBDA>lambda|L)            # 'lambda' or 'L'
+|(?P<INT>\d+)                   # integer literal
+|(?P<BOOL>true|false)           # bool literal
+|(?P<IDENT>[a-zA-Z_]\w*)        # identifier (variable names, etc.)
+|(?P<LPAREN>\()                 # (
+|(?P<RPAREN>\))                 # )
+|(?P<LBRACKET>\[)               # [
+|(?P<RBRACKET>\])               # ]
+|(?P<COMMA>,)                   # ,
+|(?P<DOT>\.)                    # .
+|(?P<WHITESPACE>\s+)            # whitespace (ignored)
+"""
+
+@dataclass
+class Token():
+    kind: str
+    val: str
+
+def tokenize(src: str) -> list[Token]:
+    tokens = []
+    for match in re.finditer(TOKEN_REGEX, src, re.VERBOSE):
+        kind = match.lastgroup
+        text = match.group()
+        assert isinstance(kind, str), "Impossible"
+        if kind == "WHITESPACE":
+            continue
+        tokens.append(Token(kind, text))
+    return tokens
+
+@dataclass
+class Parser():
+    tokens: list[Token]
+    off: int = 0
+
+    def peek(self):
+        if self.off < len(self.tokens):
+            return self.tokens[self.off]
+        return None
+
+    def next(self):
+        if self.off < len(self.tokens):
+            tok = self.tokens[self.off]
+            self.off += 1
+            return tok
+        return None
+
+    def expect(self, kind: str, err: str):
+        if not (t := self.next()) or t.kind != kind:
+            raise SyntaxError(err)
+        return t
+
+    def peek_kind(self, kind: str):
+        t = self.peek()
+        if not t or t.kind != kind:
+            return None
+        return t
+
+    def parse_list(self) -> UOp:
+        elems = []
+        while True:
+            if self.peek_kind("RBRACKET"):
+                break
+            elems.append(self.parse_atom())
+            if self.peek_kind("COMMA"):
+                self.next()
+        val = [v for v in elems]
+        return UOp(Ops.Val, [val])
+
+    def parse_atom(self) -> UOp:
+        if not (t := self.peek()):
+            raise SyntaxError("Unexpected EOF") 
+        match t.kind:
+            case "INT" | "BOOL":
+                self.next()
+                return UOp(Ops.Val, [eval(t.val)])
+            case "IDENT":
+                self.next()
+                return UOp(Ops.Var, [t.val])
+            case "LPAREN":
+                self.next()
+                expr = self.parse_expr()
+                self.expect("RPAREN", "Missing closing parenthesis")
+                return expr
+            case "LBRACKET":
+                self.next()
+                expr = self.parse_list()
+                self.expect("RBRACKET", "Missing closing bracket")
+                return expr
+            case "LAMBDA":
+                return self.parse_abstr()
+            case _:
+                raise SyntaxError(f"Unexpected token: {t}")
+
+    def parse_abstr(self) -> UOp:
+        self.next() # Lambda
+        params = []
+        while True:
+            if t := self.peek_kind("IDENT"):
+                self.next()
+                params.append(t.val)
+            else:
+                break
+        self.expect("DOT", "Expected '.' after lambda parameter")
+        if len(params) == 0:
+            raise SyntaxError("Abstractions must have at least one argument")
+        body = self.parse_expr()
+        return UOp(Ops.Abstr, [*params, body])
+
+    def parse_appl(self) -> UOp:
+        body = self.parse_atom()
+        args = []
+        while True:
+            if not (t := self.peek()):
+                break
+            if t.kind in ATOMS:
+                args.append(self.parse_atom())
+            else:
+                break
+        return UOp(Ops.Appl, [body, *args])
+
+    def parse_expr(self) -> UOp:
+        if self.peek_kind("LAMBDA"):
+            return self.parse_abstr()
+        else:
+            return self.parse_appl()
+
+def reduce_redundant(expr):
+    """Removes redundant bracket's in nested applications"""
+    if not isinstance(expr, UOp):
+        return expr 
+    if expr.op == Ops.Appl and len(expr.args) == 1:
+        return reduce_redundant(expr.args[0])
+    return UOp(expr.op, [reduce_redundant(a) for a in expr.args])
+
+def parse(src: str) -> UOp:
+    p = Parser(tokens=tokenize(src))
+    expr = p.parse_expr()
+    if p.next() is not None:
+        raise SyntaxError("Generic syntax error")
+    return reduce_redundant(expr)
