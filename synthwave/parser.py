@@ -7,7 +7,7 @@ ATOMS = (*LITERALS, "IDENT", "LPAREN", "LBRACKET", "LAMBDA")
 TOKEN_REGEX = r"""
 (?P<LAMBDA>lambda|L)            # 'lambda' or 'L'
 |(?P<INT>\d+)                   # integer literal
-|(?P<BOOL>true|false)           # bool literal
+|(?P<BOOL>True|False)           # bool literal
 |(?P<IDENT>[a-zA-Z_]\w*)        # identifier (variable names, etc.)
 |(?P<LPAREN>\()                 # (
 |(?P<RPAREN>\))                 # )
