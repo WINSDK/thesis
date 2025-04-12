@@ -1,5 +1,8 @@
 import pytest
-from synthwave.dsl import UOp, Ops, TInt, TList, TArrow, evaluate, parse, infer
+from synthwave.typing import TInt, TList, TArrow, infer
+from synthwave.dsl import UOp, Ops
+from synthwave.eval import evaluate
+from synthwave.parser import parse
 
 
 def val(x):

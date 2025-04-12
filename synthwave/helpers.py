@@ -1,6 +1,7 @@
 from sys import stderr
 from pathlib import Path
 import platform
+import inspect
 import os
 
 MODEL_DIR = Path.cwd() / "models"
@@ -49,3 +50,7 @@ def load_model(repo_id: str):
         return FastLanguageModel.from_pretrained(
             model_name=str(model_path), dtype=None, load_in_4bit=True
         )
+
+def fn_parameters(f):
+    assert callable(f), "Not a valid python function"
+    return inspect.signature(f).parameters.keys()

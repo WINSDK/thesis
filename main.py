@@ -161,15 +161,17 @@ def train_model():
 
 def main():
     if ARGS.repl:
-        from synthwave.dsl import parse, evaluate
+        from synthwave import parse, evaluate, infer
         while True:
             str = input("> ").strip()
             if len(str) == 0:
                 continue
             try:
                 expr = parse(str)
+                print(f"  => {expr}")
                 result = evaluate(expr)
-                print(f"  => {expr}\n    => {result}")
+                result_ty = infer(result)
+                print(f"    => {result} :: {result_ty}")
             except Exception as e:
                 print(f"\033[91m{repr(e)}\033[0m")
     else:
