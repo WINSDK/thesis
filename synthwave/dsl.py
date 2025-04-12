@@ -51,9 +51,12 @@ class UOp():
             case _:
                 raise ExternalError(f"Can't call uop: {self}")
 
-def external_fn(f):
+def fn_parameters(f):
     assert callable(f), "Not a valid python function"
-    params = inspect.signature(f).parameters.keys()
+    return inspect.signature(f).parameters.keys()
+
+def external_fn(f):
+    params = fn_parameters(f)
     return UOp(Ops.External, [*params, f])
 
 def builtin_add(x: int, y: int) -> int:
@@ -100,7 +103,6 @@ BUILTINS = {
 }
 
 def evaluate(expr: UOp, env: Optional[Dict[str, UOp]]=None):
-    assert isinstance(expr, UOp), f"Not an expr: {expr}"
     if env is None:
         env = {}
     def lookup(varname):
@@ -145,8 +147,7 @@ def evaluate(expr: UOp, env: Optional[Dict[str, UOp]]=None):
                     args = args[len(params):]
                     continue
                 # Applying python function 
-                body_params = inspect.signature(body).parameters.keys()
-                pv = {p: closure_env[p] for p in body_params}
+                pv = {p: closure_env[p] for p in fn_parameters(body)}
                 try:
                     result = body(**pv)
                 except Exception as e:
@@ -268,25 +269,29 @@ def fresh_type_var(prefix="a", counter=[0]) -> TVar:
     counter[0] += 1
     return TVar(name)
 
+def infer_py_ty(ty, expr=None) -> Type:
+    varname = ty.__name__
+    if ty is int:
+        return TInt()
+    if ty is bool:
+        return TBool()
+    elif ty is list and expr is not None and len(expr) > 0:
+        # Special case for list's, so that we can infer the type of
+        # A value such as: Val([1, 2, 3]) => Int List
+        return infer_py_ty(list[type(expr[0])])
+    elif ty is list or ty is Callable:
+        raise TypeError(f"Type {varname} is missing type spec")
+    elif typing.get_origin(ty) is list:
+        elems = typing.get_args(ty)[0]
+        return TList(infer_py_ty(elems))
+    elif typing.get_origin(ty) is Callable:
+        params_ty, body_ty = typing.get_args(ty)
+        params_ty = [infer_py_ty(p) for p in params_ty]
+        return TArrow.of_list(params_ty, infer_py_ty(body_ty))
+    else:
+        raise TypeError(f"Type '{varname}' isn't supported (yet)")
+
 def _infer(expr: UOp, env: Dict[str, Type], subst: Dict[TVar, Type]) -> Tuple[Type, Dict[TVar, Type]]:
-    assert isinstance(expr, UOp), f"Not an expr: {expr}"
-    def var_ty(var):
-        varname = var.__name__
-        if var is int:
-            return TInt()
-        if var is bool:
-            return TBool()
-        elif var is list or var is Callable:
-            raise TypeError(f"Type {varname} is missing type spec")
-        elif typing.get_origin(var) is list:
-            elems = typing.get_args(var)[0]
-            return TList(var_ty(elems))
-        elif typing.get_origin(var) is Callable:
-            params_ty, body_ty = typing.get_args(var)
-            params_ty = [var_ty(p) for p in params_ty]
-            return TArrow.of_list(params_ty, var_ty(body_ty))
-        else:
-            raise TypeError(f"Type {varname} isn't supported (yet)")
     def lookup(varname):
         if varname in env:
             # The type in env might be partially substituted
@@ -299,18 +304,18 @@ def _infer(expr: UOp, env: Dict[str, Type], subst: Dict[TVar, Type]) -> Tuple[Ty
             raise NameError(f"Unbound variable: {varname}")
     match expr.op:
         case Ops.Val:
-            py_ty = type(expr.args[0])
-            # Special case for list's, so that we can infer the type of
-            # A value such as: Val([1, 2, 3]) => Int List
-            if py_ty is list and len(expr.args[0]) > 0:
-                elem = expr.args[0][0]
-                return (var_ty(list[type(elem)]), subst)
-            return (var_ty(py_ty), subst)
+            ty = type(expr.args[0])
+            return (infer_py_ty(ty, expr.args[0]), subst)
         case Ops.Var:
             return lookup(expr.args[0])
         case Ops.Closure:
-            *_, body, _ = expr.args
-            return _infer(body, env, subst)
+            *args, body, _ = expr.args
+            if isinstance(body, UOp):
+                body = UOp(Ops.Abstr, [*args, body])
+                return _infer(body, env, subst)
+            else:
+                body = UOp(Ops.External, [*args, body])
+                return _infer(body, env, subst)
         case Ops.Abstr:
             *params, body = expr.args
             # We create a fresh type variable for each param
@@ -348,16 +353,21 @@ def _infer(expr: UOp, env: Dict[str, Type], subst: Dict[TVar, Type]) -> Tuple[Ty
         case Ops.External:
             *params, body = expr.args
             params_ty = body.__annotations__
-            assert len(params_ty) == len(params) + 1, \
-                   "All external functions must fully typed, including their return type"
-            body_ty = var_ty(params_ty["return"])
-            params_ty = [var_ty(params_ty[p]) for p in params]
+            assert "return" in params_ty, \
+                  f"Function '{body.__name__}' missing return type annotation"
+            assert len(fn_parameters(body)) + 1 == len(params_ty), \
+                  f"Function '{body.__name__}' missing parameter annotations"
+            body_ty = infer_py_ty(params_ty["return"])
+            params_ty = [infer_py_ty(params_ty[p]) for p in params]
             ty = TArrow.of_list(params_ty, body_ty)
             return (ty, subst)
 
-def infer(expr: UOp) -> Type:
-    ty, s = _infer(expr, {}, {})
-    return apply_subst(ty, s)
+def infer(expr) -> Type:
+    if isinstance(expr, UOp):
+        ty, s = _infer(expr, {}, {})
+        return apply_subst(ty, s)
+    else:
+        return infer_py_ty(type(expr), expr)
 
 LITERALS = ("INT", "BOOL")
 ATOMS = (*LITERALS, "IDENT", "LPAREN", "LBRACKET", "LAMBDA")
