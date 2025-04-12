@@ -171,7 +171,7 @@ def main():
                 result = evaluate(expr)
                 print(f"  => {expr}\n    => {result}")
             except Exception as e:
-                print(e)
+                print(f"\033[91m{repr(e)}\033[0m")
     else:
         train_model()
 

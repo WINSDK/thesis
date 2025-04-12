@@ -6,7 +6,7 @@ import typing
 import inspect
 import re
 
-class ExternalCall(Exception):
+class ExternalError(Exception):
     pass
 
 class Ops(IntEnum):
@@ -37,10 +37,6 @@ class UOp():
         args = ", ".join(map(fmt_arg, self.args))
         return f"{self.op.name}({args})"
 
-    # This is technically not always correct, example:
-    # => map 1 (map add [1,2 ,3])
-    #   => builtin_map(1, [Closure(y, External(x, y, builtin_add), {'x': 1}) ..
-    # Expected => [2, 3, 4]
     def __call__(self, *args):
         match self.op:
             case Ops.Closure:
@@ -53,15 +49,12 @@ class UOp():
             case Ops.Var:
                 return evaluate(self)(*args)
             case _:
-                raise ExternalCall(f"Can't call uop: {self}")
+                raise ExternalError(f"Can't call uop: {self}")
 
 def external_fn(f):
     assert callable(f), "Not a valid python function"
     params = inspect.signature(f).parameters.keys()
-    return UOp(
-        Ops.Closure,
-        [*params, UOp(Ops.External, [*params, f]), {}]
-    )
+    return UOp(Ops.External, [*params, f])
 
 def builtin_add(x: int, y: int) -> int:
     return x + y
@@ -84,6 +77,12 @@ def builtin_tail(xs: list[int]) -> list[int]:
 def builtin_append(xs: list[int], x: int) -> list[int]:
     return xs + [x]
 
+def builtin_reverse(lst: list[int]) -> list[int]:
+    return list(reversed(lst))
+
+def builtin_sort(lst: list[int]) -> list[int]:
+    return sorted(lst)
+
 def builtin_leq(a: int, b: int) -> bool:
     return a <= b
 
@@ -95,6 +94,8 @@ BUILTINS = {
     "head": external_fn(builtin_head),
     "tail": external_fn(builtin_tail),
     "append": external_fn(builtin_append),
+    "reverse": external_fn(builtin_reverse),
+    "sort": external_fn(builtin_sort),
     "leq?": external_fn(builtin_leq),
 }
 
@@ -117,11 +118,11 @@ def evaluate(expr: UOp, env: Optional[Dict[str, UOp]]=None):
             return expr
         case Ops.Var:
             return lookup(expr.args[0])
-        case Ops.Abstr:
+        case Ops.Abstr | Ops.External:
             return UOp(Ops.Closure, [*expr.args, env])
         case Ops.Appl:
             func, *args = expr.args
-            func = evaluate(func, env)
+            func = evaluate(func, env) # Closure around either an abstr or external
             args = [evaluate(a, env) for a in args]
             while args:
                 if not (isinstance(func, UOp) and func.op == Ops.Closure):
@@ -129,8 +130,7 @@ def evaluate(expr: UOp, env: Optional[Dict[str, UOp]]=None):
                 *params, body, closure_env = func.args
                 def apply(env, params, args):
                     env = env.copy()
-                    for p, v in zip(params, args):
-                        env[p] = v
+                    env.update(dict(zip(params, args)))
                     return env
                 if len(args) < len(params):
                     # Not enough arguments, so we do partial application
@@ -138,20 +138,34 @@ def evaluate(expr: UOp, env: Optional[Dict[str, UOp]]=None):
                     not_applied = params[len(args):]
                     closure_env = apply(closure_env, params, args)
                     return UOp(Ops.Closure, [*not_applied, body, closure_env])
-                else:
-                    # Full application or over-applied 
-                    closure_env = apply(closure_env, params, args[:len(params)])
+                # Full application or over-applied 
+                closure_env = apply(closure_env, params, args[:len(params)])
+                if isinstance(body, UOp):
                     func = evaluate(body, closure_env)
                     args = args[len(params):]
+                    continue
+                # Applying python function 
+                body_params = inspect.signature(body).parameters.keys()
+                pv = {p: closure_env[p] for p in body_params}
+                try:
+                    result = body(**pv)
+                except Exception as e:
+                    params = ", ".join(map(str, pv.values()))
+                    raise ExternalError(f"{body.__name__}({params}): {e}")
+                args = args[len(params):]
+                # It's a full application
+                if not args:
+                    return result
+                # The builtin returned a new closure
+                if isinstance(result, UOp) and result.op == Ops.Closure:
+                    func = result
+                    continue
+                # The builtin returned another builtin
+                if callable(result):
+                    func = external_fn(result)
+                    continue
+                raise ExternalError(f"Overapplication: {result} is not callable.")
             return func
-        case Ops.External:
-            *params, body = expr.args
-            pv = {p: lookup(p) for p in params}
-            try:
-                return body(**pv)
-            except Exception as e:
-                params = ", ".join(map(str, pv.values()))
-                raise ExternalCall(f"{body.__name__}({params})") from e
 
 @dataclass
 class TInt:
@@ -345,7 +359,8 @@ def infer(expr: UOp) -> Type:
     ty, s = _infer(expr, {}, {})
     return apply_subst(ty, s)
 
-ATOMS = ("INT", "BOOL", "IDENT", "LPAREN", "LBRACKET", "LAMBDA")
+LITERALS = ("INT", "BOOL")
+ATOMS = (*LITERALS, "IDENT", "LPAREN", "LBRACKET", "LAMBDA")
 TOKEN_REGEX = r"""
 (?P<LAMBDA>lambda|L)            # 'lambda' or 'L'
 |(?P<INT>\d+)                   # integer literal
@@ -409,7 +424,14 @@ class Parser():
         while True:
             if self.peek_kind("RBRACKET"):
                 break
-            elems.append(self.parse_atom())
+            # We currently only support list's of literals
+            if not (t := self.peek()):
+                raise SyntaxError("Unexpected EOF") 
+            if t.kind in LITERALS:
+                self.next()
+                elems.append(eval(t.val))
+            else:
+                raise SyntaxError("List must be made up of literals")
             if self.peek_kind("COMMA"):
                 self.next()
         val = [v for v in elems]

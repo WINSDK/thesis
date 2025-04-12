@@ -1,6 +1,5 @@
 import pytest
-from synthwave.dsl import UOp, Ops, evaluate
-from synthwave.dsl import TInt, TList, TArrow, infer
+from synthwave.dsl import UOp, Ops, TInt, TList, TArrow, evaluate, parse, infer
 
 
 def val(x):
@@ -157,6 +156,14 @@ def test_map_add5():
         val([1, 2, 3]),
     ])
     assert evaluate(expr) == [6, 7, 8]
+
+def test_sort_then_reverse():
+    expr = parse("reverse (sort [3, 1, 2])")
+    assert evaluate(expr) == [3, 2, 1]
+
+def test_sort_reverse_map():
+    expr = parse("reverse (sort (map (Lx. add 3 (mul x 2)) [1, 5, 10, 30]))")
+    assert evaluate(expr) == [63, 23, 13, 5]
 
 def test_closure_call():
     inc = UOp(Ops.Closure, [
