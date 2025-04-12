@@ -119,7 +119,7 @@ def infer_py_ty(ty, expr=None) -> Type:
         # A value such as: Val([1, 2, 3]) => Int List
         return infer_py_ty(list[type(expr[0])])
     elif ty is list or ty is Callable:
-        raise TypeError(f"Type {varname} is missing type spec")
+        return TList(fresh_type_var())
     elif typing.get_origin(ty) is list:
         elems = typing.get_args(ty)[0]
         return TList(infer_py_ty(elems))
