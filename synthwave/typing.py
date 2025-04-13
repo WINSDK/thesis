@@ -38,9 +38,6 @@ class Type():
             case T.Var:
                 return str(self.params[0])
 
-def func_arrow(params_ty: list[Type], body_ty: Type) -> Type:
-    return Type(T.Arrow, [*params_ty, body_ty])
-
 def apply_subst(ty: Type, subst: Dict[Type, Type]) -> Type:
     if ty.t == T.Var and ty in subst:
         return apply_subst(subst[ty], subst)
@@ -114,7 +111,7 @@ def infer_py_ty(ty, expr=None) -> Type:
     elif typing.get_origin(ty) is Callable:
         params_ty, body_ty = typing.get_args(ty)
         params_ty = [infer_py_ty(p) for p in params_ty]
-        return func_arrow(params_ty, infer_py_ty(body_ty))
+        return Type(T.Arrow, [*params_ty, infer_py_ty(body_ty)])
     else:
         raise TypeError(f"Type '{varname}' isn't supported (yet)")
 
@@ -148,14 +145,14 @@ def _infer(expr: UOp, env: Dict[str, Type], subst: Dict[Type, Type]) -> Tuple[Ty
             # We create a fresh type variable for each param
             # or you might do something fancy if param type is annotated
             env = env.copy()
-            params_ty = []
+            param_tys = []
             for p in params:
                 tv = fresh_type_var()
                 env[p] = tv
-                params_ty.append(tv)
+                param_tys.append(tv)
             # Infer body with those param types in env
             (body_ty, subst) = _infer(body, env, subst)
-            ty = func_arrow(params_ty, body_ty)
+            ty = Type(T.Arrow, [*param_tys, body_ty])
             return (ty, subst)
         case Ops.Appl:
             func, *args = expr.args
@@ -177,14 +174,14 @@ def _infer(expr: UOp, env: Dict[str, Type], subst: Dict[Type, Type]) -> Tuple[Ty
             return (result_ty, subst)
         case Ops.External:
             *params, body = expr.args
-            params_ty = body.__annotations__
-            assert "return" in params_ty, \
+            param_tys = body.__annotations__
+            assert "return" in param_tys, \
                   f"Function '{body.__name__}' missing return type annotation"
-            assert len(fn_parameters(body)) + 1 == len(params_ty), \
+            assert len(fn_parameters(body)) + 1 == len(param_tys), \
                   f"Function '{body.__name__}' missing parameter annotations"
-            body_ty = infer_py_ty(params_ty["return"])
-            params_ty = [infer_py_ty(params_ty[p]) for p in params]
-            ty = func_arrow(params_ty, body_ty)
+            body_ty = infer_py_ty(param_tys["return"])
+            param_tys = [infer_py_ty(param_tys[p]) for p in params]
+            ty = Type(T.Arrow, [*param_tys, body_ty])
             return (ty, subst)
 
 def infer(expr) -> Type:
