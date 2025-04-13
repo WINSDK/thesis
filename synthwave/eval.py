@@ -52,8 +52,8 @@ def evaluate(expr: UOp, env: Optional[Dict[str, UOp]]=None):
                 try:
                     result = body(**pv)
                 except Exception as e:
-                    params = ", ".join(map(str, pv.values()))
-                    raise ExternalError(f"{body.__name__}({params}): {e}")
+                    params = ", ".join(map(str, pv.keys()))
+                    raise ExternalError(str(e))
                 args = args[len(params):]
                 # It's a full application
                 if not args:

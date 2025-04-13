@@ -10,6 +10,8 @@ from .dsl import UOp, Ops
 class T(IntEnum):
     Var = auto()
     Int = auto()
+    Float = auto()
+    Char = auto()
     Bool = auto()
     List = auto()
     Arrow = auto()
@@ -29,6 +31,10 @@ class Type():
         match self.t:
             case T.Int:
                 return "Int"
+            case T.Float:
+                return "Float"
+            case T.Char:
+                return "Char"
             case T.Bool:
                 return "Bool"
             case T.List:
@@ -99,6 +105,10 @@ def infer_py_ty(ty, expr=None) -> Type:
         return Type(T.Int)
     if ty is bool:
         return Type(T.Bool)
+    if ty is float:
+        return Type(T.Float)
+    if ty is str:
+        return Type(T.Char)
     elif ty is list and expr is not None and len(expr) > 0:
         # Special case for list's, so that we can infer the type of
         # A value such as: Val([1, 2, 3]) => Int List

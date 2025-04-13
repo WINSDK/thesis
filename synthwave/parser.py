@@ -2,20 +2,23 @@ from dataclasses import dataclass
 import re
 from .dsl import UOp, Ops
 
-LITERALS = ("INT", "BOOL")
+LITERALS = ("FLOAT", "INT", "BOOL", "CHAR", "STRING")
 ATOMS = (*LITERALS, "IDENT", "LPAREN", "LBRACKET", "LAMBDA")
 TOKEN_REGEX = r"""
-(?P<LAMBDA>lambda|L)            # 'lambda' or 'L'
-|(?P<INT>\d+)                   # integer literal
-|(?P<BOOL>True|False)           # bool literal
-|(?P<IDENT>[a-zA-Z_]\w*)        # identifier (variable names, etc.)
-|(?P<LPAREN>\()                 # (
-|(?P<RPAREN>\))                 # )
-|(?P<LBRACKET>\[)               # [
-|(?P<RBRACKET>\])               # ]
-|(?P<COMMA>,)                   # ,
-|(?P<DOT>\.)                    # .
-|(?P<WHITESPACE>\s+)            # whitespace (ignored)
+(?P<LAMBDA>lambda|L|λ)              # 'lambda' or 'L' or 'λ'
+|(?P<FLOAT>-?(?:\d+\.\d*|\d*\.\d+)) # float literal (e.g. 123.456, -0.5)
+|(?P<INT>-?\d+)                     # integer literal
+|(?P<BOOL>True|False)               # bool literal
+|(?P<CHAR>'(?:\\.|[^\\'])')         # char literal (e.g. 'a', '\n')
+|(?P<STRING>"(?:\\.|[^\\"])*")      # string literal (e.g. "hello", "line\nbreak")
+|(?P<IDENT>[a-zA-Z_]\w*)            # identifier (variable names, etc.)
+|(?P<LPAREN>\()                     # (
+|(?P<RPAREN>\))                     # )
+|(?P<LBRACKET>\[)                   # [
+|(?P<RBRACKET>\])                   # ]
+|(?P<COMMA>,)                       # ,
+|(?P<DOT>\.)                        # .
+|(?P<WHITESPACE>\s+)                # whitespace (ignored)
 """
 
 @dataclass
@@ -46,7 +49,7 @@ class Parser():
 
     def peek_no_eof(self):
         if not (t := self.peek()):
-            raise SyntaxError("Unexpected EOF")
+            raise SyntaxError("Incomplete statement")
         return t
 
     def next(self):
@@ -67,6 +70,17 @@ class Parser():
             return None
         return t
 
+    def parse_primitive(self, t):
+        match t.kind:
+            case "INT" | "FLOAT" | "BOOL":
+                self.next()
+                return eval(t.val)
+            case "CHAR" | "STRING":
+                self.next()
+                return list(eval(t.val))
+            case _:
+                raise SyntaxError(f"Unknown primitive: {t}")
+
     def parse_list(self) -> UOp:
         elems = []
         while True:
@@ -75,8 +89,8 @@ class Parser():
             # We currently only support list's of literals
             t = self.peek_no_eof()
             if t.kind in LITERALS:
-                self.next()
-                elems.append(eval(t.val))
+                prim = self.parse_primitive(t)
+                elems.append(prim)
             else:
                 raise SyntaxError("List must be made up of literals")
             if self.peek_kind("COMMA"):
@@ -87,9 +101,9 @@ class Parser():
     def parse_atom(self) -> UOp:
         t = self.peek_no_eof()
         match t.kind:
-            case "INT" | "BOOL":
-                self.next()
-                return UOp(Ops.Val, [eval(t.val)])
+            case "INT" | "FLOAT" | "BOOL" | "CHAR" | "STRING":
+                prim = self.parse_primitive(t)
+                return UOp(Ops.Val, [prim])
             case "IDENT":
                 self.next()
                 return UOp(Ops.Var, [t.val])

@@ -163,14 +163,18 @@ def main():
     if ARGS.repl:
         from synthwave import parse, evaluate, infer
         while True:
-            str = input("> ").strip()
-            if len(str) == 0:
+            s = input("> ").strip()
+            if len(s) == 0:
                 continue
             try:
-                expr = parse(str)
+                expr = parse(s)
                 print(f"  => {expr}")
                 result = evaluate(expr)
                 result_ty = infer(result)
+                # Pretty print Char List
+                if isinstance(result, list) and len(result) > 0:
+                    if isinstance(result[0], str):
+                        result = '"' + "".join(result) + '"'
                 print(f"    => {result} :: {result_ty}")
             except Exception as e:
                 print(f"\033[91m{repr(e)}\033[0m")
