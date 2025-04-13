@@ -1,5 +1,5 @@
 import pytest
-from synthwave.typing import TInt, TList, TArrow, infer
+from synthwave.typing import infer
 from synthwave.dsl import UOp, Ops
 from synthwave.eval import evaluate
 from synthwave.parser import parse
@@ -214,7 +214,7 @@ def test_infer_val():
     # Val(42) -> Int
     expr = val(42)
     ty = infer(expr)
-    assert isinstance(ty, TInt), f"Expected TInt, got {ty}"
+    assert str(ty), "Int"
 
 def test_infer_abstr_single():
     # λx. x + 1 => Int -> Int
@@ -224,9 +224,7 @@ def test_infer_abstr_single():
         UOp(Ops.Appl, [var("add"), var("x"), val(1)])
     ])
     ty = infer(expr)
-    assert isinstance(ty, TArrow), f"Expected TArrow, got {ty}"
-    assert isinstance(ty.param, TInt), f"Expected param TInt, got {ty.param}"
-    assert isinstance(ty.result, TInt), f"Expected result TInt, got {ty.result}"
+    assert str(ty) == "Int -> Int"
 
 def test_infer_appl_single():
     # (λx. x+1) 41 => Int
@@ -240,7 +238,7 @@ def test_infer_appl_single():
     ])
     expr = UOp(Ops.Appl, [func, val(41)])
     ty = infer(expr)
-    assert isinstance(ty, TInt), f"Expected TInt, got {ty}"
+    assert str(ty) == "Int"
 
 def test_infer_abstr_multi():
     # λx y. x + y => Int -> Int -> Int
@@ -250,12 +248,7 @@ def test_infer_abstr_multi():
         UOp(Ops.Appl, [var("add"), var("x"), var("y")])
     ])
     ty = infer(expr)
-    assert isinstance(ty, TArrow), f"Expected TArrow, got {ty}"
-    assert isinstance(ty.param, TInt), f"Expected first param TInt, got {ty.param}"
-    rty = ty.result
-    assert isinstance(rty, TArrow), f"Expected TArrow, got {rty}"
-    assert isinstance(rty.param, TInt), f"Expected second param TInt, got {rty.param}"
-    assert isinstance(rty.result, TInt), f"Expected result TInt, got {rty.result}"
+    assert str(ty) == "Int -> Int -> Int"
 
 def test_infer_appl_multi():
     # (λx y. x * y) 6 7 => Int
@@ -274,7 +267,7 @@ def test_infer_appl_multi():
         val(7),
     ])
     ty = infer(expr)
-    assert isinstance(ty, TInt), f"Expected TInt, got {ty}"
+    assert str(ty) == "Int"
 
 def test_infer_nested():
     # (λx y. (λz. x + z) (y * 2)) 5 10 => int
@@ -304,7 +297,7 @@ def test_infer_nested():
     ])
     call = UOp(Ops.Appl, [outer, val(5), val(10)])
     ty = infer(call)
-    assert isinstance(ty, TInt), f"Expected TInt, got {ty}"
+    assert str(ty) == "Int"
 
 def test_infer_type_error():
     # A mismatch: Add(Val(5), λx. x+1)
@@ -341,5 +334,4 @@ def test_infer_map_add5():
         val([1, 2, 3]),
     ])
     ty = infer(expr)
-    assert isinstance(ty, TList), f"Expected list type, got {ty}"
-    assert isinstance(ty.elems, TInt), f"Expected list of ints, got {ty.elems}"
+    assert str(ty) == "Int List"

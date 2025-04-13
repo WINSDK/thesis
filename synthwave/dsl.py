@@ -7,9 +7,9 @@ class ExternalError(Exception):
 
 class Ops(IntEnum):
     # Wrapped python value
-    Val   = auto()
+    Val = auto()
     # Anything that's `named`: functions, parameters, etc
-    Var   = auto()  
+    Var = auto()  
     # Application (M N): [body, param1, param2, ..]
     Appl = auto()
     # Abstraction (λx.M): [arg1, arg2, .., body]
