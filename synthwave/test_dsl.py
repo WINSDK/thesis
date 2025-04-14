@@ -2,7 +2,6 @@ import pytest
 from synthwave.typing import infer
 from synthwave.dsl import UOp, Ops
 from synthwave.eval import evaluate, define
-from synthwave.parser import parse
 
 
 def val(x):

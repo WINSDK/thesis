@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 import re
-from .dsl import UOp, Ops
+from .dsl import Type, UOp, Ops, TVar, T
 
 LITERALS = ("FLOAT", "INT", "BOOL", "CHAR", "STRING")
 ATOMS = (*LITERALS, "IDENT", "LPAREN", "LBRACKET", "LAMBDA")
@@ -74,14 +74,16 @@ class Parser():
         match t.kind:
             case "BOOL":
                 self.next()
-                prim = eval(t.val)
-                return true_expr if prim else false_expr
+                prim = "True" if eval(t.val) else "False"
+                return UOp(Ops.Var, [prim])
             case "INT" | "FLOAT":
                 self.next()
-                return eval(t.val)
+                prim = eval(t.val)
+                return UOp(Ops.Val, [prim])
             case "CHAR" | "STRING":
                 self.next()
-                return list(eval(t.val))
+                prim = list(eval(t.val))
+                return UOp(Ops.Val, [prim])
             case _:
                 raise SyntaxError(f"Unknown primitive: {t}")
 
@@ -106,8 +108,7 @@ class Parser():
         t = self.peek_no_eof()
         match t.kind:
             case "INT" | "FLOAT" | "BOOL" | "CHAR" | "STRING":
-                prim = self.parse_primitive(t)
-                return UOp(Ops.Val, [prim])
+                return self.parse_primitive(t)
             case "IDENT":
                 self.next()
                 return UOp(Ops.Var, [t.val])
@@ -174,5 +175,43 @@ def parse(src: str) -> UOp:
         raise SyntaxError()
     return reduce_redundant(expr)
 
-true_expr = parse("λt f. t")
-false_expr = parse("λt f. f")
+POLY_TYPE_REGEX = re.compile(r"\(|\)|->|[A-Za-z]+")
+
+def parse_poly_type(s: str) -> Type:
+    tokens = POLY_TYPE_REGEX.findall(s)
+    tv_cache = {}  # cache for generic TVar"s
+    def get_tv(name: str) -> TVar:
+        if name not in tv_cache:
+            tv_cache[name] = TVar(name)
+        return tv_cache[name]
+    def parse_atom() -> Type:
+        token = tokens.pop(0)
+        if token == "(":
+            typ = parse_arrow()
+            tokens.pop(0)
+            return typ
+        elif token == "Int":
+            return Type(T.Int)
+        elif token == "Float":
+            return Type(T.Float)
+        elif token == "Bool":
+            return Type(T.Bool)
+        elif token == "Char":
+            return Type(T.Char)
+        elif token == "String":
+            return Type(T.List, [Type(T.Char)])
+        elif token == "List":
+            return Type(T.List, [parse_atom()])
+        else:
+            return get_tv(token)
+    def parse_arrow() -> Type:
+        # Parse a sequence of types separated by "->"
+        types = [parse_atom()]
+        while tokens and tokens[0] == "->":
+            tokens.pop(0)
+            types.append(parse_atom())
+        if len(types) == 1:
+            return types[0]
+        # Arrow types are right-associative: fold as param1 -> (param2 -> (... -> result))
+        return Type.arrow(types[:-1], types[-1])
+    return parse_arrow()

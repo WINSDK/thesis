@@ -1,33 +1,11 @@
-from collections.abc import Callable
-from dataclasses import dataclass
-from typing import Any, Dict, Tuple
-import typing
-from .eval import BUILTINS, GENERICS
-from .dsl import UOp, Ops, T, Type
+from typing import Dict, Tuple
+from .eval import BUILTIN_SCHEMES
+from .dsl import UOp, Ops, T, Type, Scheme, TVar
 
 PRIMITIVES = [t.value for t in T if t.value not in [T.List, T.Arrow]]
 
-@dataclass(eq=True, frozen=True)
-class TVar(Type):
-    name: str
-    generic: bool = False
-
-    def __repr__(self):
-        s = self.name
-        if self.generic:
-            # Strip numeric suffix
-            while s[-1].isnumeric():
-                s = s[:-1]
-        return s
-
 Subst = Dict[TVar, Type]
-
-def arrow_of_list(params_ty: list[Type], body_ty: Type) -> Type:
-    """Rfold for function types param1 -> param2 -> ... -> body"""
-    func_ty = body_ty
-    for pt in reversed(params_ty):
-        func_ty = Type(T.Arrow, [pt, func_ty])
-    return func_ty
+Env = Dict[str, Scheme]
 
 def apply_subst(ty: Type, subst: Subst) -> Type:
     if isinstance(ty, TVar):
@@ -51,23 +29,22 @@ def occurs_in_type(tv: TVar, ty: Type, subst: Subst) -> bool:
         return False
 
 def var_bind(tv: TVar, ty: Type, subst: Subst) -> Subst:
-    """Bind the type var 'tv' to type 'ty' if allowed"""
+    """Bind the type variable 'tv' to type 'ty' if allowed."""
     if tv == ty:
         return subst
-    # Cannot bind a type variable to a type that contains it
+    # Cannot bind a type variable to a type that contains it.
     if occurs_in_type(tv, ty, subst):
         raise TypeError(f"Occurs check fails: {tv} in {ty}")
-    # Override the subst
-    subst = subst.copy()
-    subst[tv] = ty
-    return subst
+    new_subst = subst.copy()
+    new_subst[tv] = ty
+    return new_subst
 
 def unify(t1: Type, t2: Type, subst: Subst) -> Subst:
-    """Unify t1 and t2 under the existing subst"""
-    # 1) Apply current subst so we see the "true" forms
+    """Unify t1 and t2 under the existing substitution."""
+    # 1) Apply current substitution so we see the "true" forms.
     t1 = apply_subst(t1, subst)
     t2 = apply_subst(t2, subst)
-    # 2) Pattern-match on t1, t2
+    # 2) Pattern-match on t1 and t2.
     if isinstance(t1, TVar):
         return var_bind(t1, t2, subst)
     elif isinstance(t2, TVar):
@@ -75,9 +52,8 @@ def unify(t1: Type, t2: Type, subst: Subst) -> Subst:
     elif any(t1.t == t and t2.t == t for t in PRIMITIVES):
         return subst
     elif t1.t == t2.t:
-        # This is fine, so long as types have fixed number of args
-        for t1, t2 in zip(t1.params, t2.params):
-            subst = unify(t1, t2, subst)
+        for t1_arg, t2_arg in zip(t1.params, t2.params):
+            subst = unify(t1_arg, t2_arg, subst)
         return subst
     else:
         raise TypeError(f"Cannot unify {t1} with {t2}")
@@ -87,73 +63,70 @@ def fresh_type_var(prefix="a", counter=[0]) -> Type:
     counter[0] += 1
     return TVar(name)
 
-def infer_py_ty(ty, expr=None) -> Type:
-    if ty is int:
-        return Type(T.Int)
-    if ty is bool:
-        return Type(T.Bool)
-    if ty is float:
-        return Type(T.Float)
-    if ty is str:
-        return Type(T.Char)
-    if ty is Any:
-        return fresh_type_var()
-    elif ty is list and expr is not None and len(expr) > 0:
-        # Special case for list's, so that we can infer the type of
-        # A value such as: Val([1, 2, 3]) => Int List
-        return infer_py_ty(list[type(expr[0])])
-    elif typing.get_origin(ty) is list:
-        # Infer based on function annotations
-        elems = typing.get_args(ty)[0]
-        return Type(T.List, [infer_py_ty(elems)])
-    elif typing.get_origin(ty) is Callable:
-        # Infer based on function annotations
-        params_ty, body_ty = typing.get_args(ty)
-        params_ty = [infer_py_ty(p) for p in params_ty]
-        return arrow_of_list(params_ty, infer_py_ty(body_ty))
-    elif ty is list:
-        return Type(T.List, [fresh_type_var()])
-    elif ty is Callable:
-        return Type(T.Arrow, [fresh_type_var(), fresh_type_var()])
-    elif ty in GENERICS:
-        return TVar(str(ty), generic=True)
-    else:
-        raise TypeError(f"Type {ty.__name__} isn't supported (yet)")
+def generalize(env: Dict[str, Scheme], ty: Type) -> Scheme:
+    env_ft = set()
+    for scheme in env.values():
+        env_ft |= scheme.free_vars()
+    ty_ft = ty.free_vars()
+    quantified = list(ty_ft - env_ft)
+    return Scheme(quantified, ty)
 
-def infer_from_anno(body: Type, p: str):
-    params_ty = body.__annotations__
-    if p in params_ty and p:
-        return infer_py_ty(params_ty[p])
-    else:
-        return fresh_type_var()
+def instantiate(scheme: Scheme) -> Type:
+    mapping = {}
+    for var in scheme.vars:
+        mapping[var] = fresh_type_var(var.name)
+    return apply_subst(scheme.ty, mapping)
 
-def _infer(expr: UOp, env: Subst, subst: Subst) -> Tuple[Type, Subst]:
-    def lookup(varname):
-        if varname in env:
-            # The type in env might be partially substituted
-            return (apply_subst(env[varname], subst), subst)
-        elif varname in BUILTINS:
-            # Built-in functions are always external and therefore
-            # don't require substitution
-            return _infer(BUILTINS[varname], env, subst)
+def infer_py_ty(expr, env: Env, subst: Subst) -> Tuple[Type, Subst]:
+    if isinstance(expr, int):
+        py_ty = Type(T.Int)
+    elif isinstance(expr, bool):
+        py_ty = Type(T.Bool)
+    elif isinstance(expr, float):
+        py_ty = Type(T.Float)
+    elif isinstance(expr, str):
+        py_ty = Type(T.Char)
+    elif isinstance(expr, list) and len(expr) > 0:
+        # Special case for list of elements.
+        # We infer the type of the list through the first item.
+        if isinstance(expr[0], UOp):
+            elem_ty, subst = _infer(expr[0], env, subst)
         else:
+            elem_ty, subst = infer_py_ty(expr[0], env, subst)
+        py_ty = Type(T.List, [elem_ty])
+    elif isinstance(expr, list):
+        py_ty = Type(T.List, [fresh_type_var()])
+    else:
+        raise TypeError(f"Type {type(expr).__name__} isn't supported (yet)")
+    return py_ty, subst
+
+def infer_maybe_py(expr, env: Env, subst: Subst) -> Tuple[Type, Subst]:
+    if isinstance(expr, UOp):
+        return _infer(expr, env, subst)
+    else:
+        return infer_py_ty(expr, env, subst)
+
+def _infer(expr: UOp, env: Env, subst: Subst) -> Tuple[Type, Subst]:
+    def lookup(varname: str) -> Tuple[Type, Subst]:
+        if varname in env:
+            # Instantiate the scheme to get a fresh copy of the type.
+            return (instantiate(env[varname]), subst)
+        else:
+            print(env)
             raise NameError(f"Unbound variable {varname}")
     match expr.op:
         case Ops.Val:
-            expr_ = expr.args[0]
-            if isinstance(expr_, UOp):
-                return _infer(expr_, env, subst)
-            else:
-                return (infer_py_ty(type(expr_), expr_), subst)
+            return infer_maybe_py(expr.args[0], env, subst)
         case Ops.Var:
             return lookup(expr.args[0])
         case Ops.Closure:
             *args, body, closure = expr.args
-            # Merge captured env into the type inference env
+            # Merge captured environment into the type-inference environment.
             env = env.copy()
             for k, v in closure.items():
+                # Infer the type of the captured value, then generalize it.
                 v_ty, subst = _infer(UOp(Ops.Val, [v]), env, subst)
-                env[k] = v_ty
+                env[k] = generalize(env, v_ty)
             if isinstance(body, UOp):
                 body = UOp(Ops.Abstr, [*args, body])
                 return _infer(body, env, subst)
@@ -162,44 +135,34 @@ def _infer(expr: UOp, env: Subst, subst: Subst) -> Tuple[Type, Subst]:
                 return _infer(body, env, subst)
         case Ops.Abstr:
             *params, body = expr.args
-            # We create a fresh type variable for each param
-            # or you might do something fancy if param type is annotated
-            env = env.copy()
+            new_env = env.copy()
             params_ty = []
             for p in params:
-                ty = fresh_type_var()
-                env[p] = ty
-                params_ty.append(ty)
-            # Infer body with those param types in env
-            (body_ty, subst) = _infer(body, env, subst)
-            ty = arrow_of_list(params_ty, body_ty)
+                tv = fresh_type_var()
+                # When a parameter is introduced, it is monomorphic until it is generalized.
+                new_env[p] = Scheme([], tv)
+                params_ty.append(tv)
+            body_ty, subst = _infer(body, new_env, subst)
+            ty = Type.arrow(params_ty, body_ty)
             return (ty, subst)
         case Ops.External:
             *params, body = expr.args
-            body_ty = infer_from_anno(body, "return")
-            params_ty = [infer_from_anno(body, p) for p in params]
-            ty = arrow_of_list(params_ty, body_ty)
-            return (ty, subst)
+            # I don't like requiring builtin's to be defined python fn's
+            fn_name = body.__name__.removeprefix("builtin_")
+            return lookup(fn_name)
         case Ops.Appl:
             func, *args = expr.args
-            # 1. Infer the type of func
-            (func_ty, subst) = _infer(func, env, subst)
+            func_ty, subst = _infer(func, env, subst)
             for arg in args:
-                # The function must be an arrow: param_type -> result_type
+                # For each argument, the function type must be an arrow.
                 param_ty = fresh_type_var()
                 result_ty = fresh_type_var()
                 subst = unify(func_ty, Type(T.Arrow, [param_ty, result_ty]), subst)
-                # Infer arg type
-                (arg_ty, subst) = _infer(arg, env, subst)
-                # Unify arg type with param
+                arg_ty, subst = _infer(arg, env, subst)
                 subst = unify(arg_ty, param_ty, subst)
                 func_ty = result_ty
-            # After applying all arguments, func_ty is the final type of the application
             return (func_ty, subst)
 
 def infer(expr) -> Type:
-    if isinstance(expr, UOp):
-        ty, s = _infer(expr, {}, {})
-        return apply_subst(ty, s)
-    else:
-        return infer_py_ty(type(expr), expr)
+    ty, subst = infer_maybe_py(expr, BUILTIN_SCHEMES, {})
+    return apply_subst(ty, subst)

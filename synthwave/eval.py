@@ -1,8 +1,17 @@
 from collections.abc import Callable
-from typing import Dict, Optional, TypeAliasType, Any
-from .dsl import UOp, Ops, ExternalError
+from functools import cache
+from typing import Dict, Optional
+from .dsl import Scheme, UOp, Ops, TVar, ExternalError
 from .helpers import fn_parameters
-from .parser import parse
+from .parser import parse, parse_poly_type
+
+def eval_maybe_py(expr):
+    # Specialized to lists and singular values
+    if isinstance(expr, UOp):
+        return evaluate(expr)
+    elif isinstance(expr, list):
+        return [eval_maybe_py(x) for x in expr]
+    return expr
 
 def evaluate(expr: UOp, env: Optional[Dict[str, UOp]]=None):
     if env is None:
@@ -17,11 +26,10 @@ def evaluate(expr: UOp, env: Optional[Dict[str, UOp]]=None):
         return var
     match expr.op:
         case Ops.Val:
-            expr = expr.args[0]
-            return evaluate(expr) if isinstance(expr, UOp) else expr
+            return eval_maybe_py(expr.args[0])
         case Ops.Var:
             expr = lookup(expr.args[0])
-            return evaluate(expr) if isinstance(expr, UOp) else expr
+            return eval_maybe_py(expr)
         case Ops.Closure:
             return expr
         case Ops.Abstr | Ops.External:
@@ -51,7 +59,8 @@ def evaluate(expr: UOp, env: Optional[Dict[str, UOp]]=None):
                     args = args[len(params):]
                     continue
                 # Applying python function
-                pv = {p: closure_env[p] for p in fn_parameters(body)}
+                params = fn_parameters(body)
+                pv = {p: eval_maybe_py(closure_env[p]) for p in params}
                 try:
                     result = body(**pv)
                 except Exception as e:
@@ -76,88 +85,69 @@ def external_fn(f: Callable):
     params = fn_parameters(f)
     return UOp(Ops.External, [*params, f])
 
-GENERICS = set()
+@cache
+def poly_type(s: str) -> Scheme:
+    ty = parse_poly_type(s)
+    vars = [TVar(tv.name, generic=True) for tv in ty.free_vars()]
+    return Scheme(vars, ty)
 
-def fresh_generic_type(name: str, counter=[0]):
-    assert len(name) != 0, "Generics must be named"
-    name = f"{name}{counter[0]}"
-    counter[0] += 1
-    ty = TypeAliasType(name, Any) # type: ignore[reportGeneralTypeIssues]
-    GENERICS.add(ty)
-    return ty
-
-def define(e: str) -> UOp:
+def define(s: str) -> UOp:
     # Can't just `parse` sometimes. Some expressions require being evaluated
     # into closures: these can be abstractions or externals.
-    expr = evaluate(parse(e))
+    expr = evaluate(parse(s))
     if not isinstance(expr, UOp):
         expr = UOp(Ops.Val, [expr])
     return expr
 
-y_combinator_expr = define("λf. (λx. f (x x)) (λx. f (x x))")
-
-true_expr = define("True")
-false_expr = define("False")
-
 ### Arithmetic primitives
 
-T = fresh_generic_type("T")
-def builtin_add(x: T, y: T) -> T: # type: ignore[reportInvalidTypeForm]
+def builtin_add(x, y):
     return x + y
 
-T = fresh_generic_type("T")
-def builtin_mul(x: T, y: T) -> T: # type: ignore[reportInvalidTypeForm]
+def builtin_mul(x, y):
     return x * y
 
-T = fresh_generic_type("T")
-def builtin_sub(x: T, y: T) -> T: # type: ignore[reportInvalidTypeForm]
+def builtin_sub(x, y):
     return x - y
 
-T = fresh_generic_type("T")
-def builtin_div(x: T, y: T) -> T: # type: ignore[reportInvalidTypeForm]
+def builtin_div(x, y):
     return x // y
 
-T = fresh_generic_type("T")
-def builtin_mod(x: T, y: T) -> T: # type: ignore[reportInvalidTypeForm]
+def builtin_mod(x, y):
     return x % y
 
-T = fresh_generic_type("T")
-def builtin_pow(x: T, y: T) -> T: # type: ignore[reportInvalidTypeForm]
+def builtin_pow(x, y):
     return x ** y
 
 ### Comparison primitives
 
+true_expr = parse("λt f. t")
+false_expr = parse("λt f. f")
+
 if_expr = define("λc t e. c t e")
 
-def church_bool(cond: bool) -> UOp:
+def church_bool(cond):
     return true_expr if cond else false_expr
 
-T = fresh_generic_type("T")
-def builtin_eq(x: T, y: T): # type: ignore[reportInvalidTypeForm]
-    if isinstance(x, UOp) and isinstance(x, UOp):
+def builtin_eq(x, y):
+    # (Note: adjust as needed if UOp equality should be handled differently.)
+    if isinstance(x, UOp) and isinstance(y, UOp):
         return and_expr(x, y)
     return church_bool(x == y)
 
-T = fresh_generic_type("T")
-def builtin_neq(x: T, y: T): # type: ignore[reportInvalidTypeForm]
-    if isinstance(x, UOp) and isinstance(x, UOp):
-        return xor_expr(x, y)
+def builtin_neq(x, y):
     return not builtin_eq(x, y)
 
-T = fresh_generic_type("T")
-def builtin_gt(x: T, y: T): # type: ignore[reportInvalidTypeForm]
+def builtin_gt(x, y):
     return church_bool(x > y)
 
-T = fresh_generic_type("T")
-def builtin_lt(x: T, y: T): # type: ignore[reportInvalidTypeForm]
+def builtin_lt(x, y):
     return church_bool(x < y)
 
-T = fresh_generic_type("T")
-def builtin_geq(x: T, y: T): # type: ignore[reportInvalidTypeForm]
-    return church_bool(x <= y) # Swapped cause of ordering
+def builtin_geq(x, y):
+    return church_bool(x <= y)  # note: swapped ordering if needed
 
-T = fresh_generic_type("T")
-def builtin_leq(x: T, y: T): # type: ignore[reportInvalidTypeForm]
+def builtin_leq(x, y):
     return church_bool(x >= y)
 
 ### Boolean/logical operators
@@ -172,16 +162,12 @@ xor_expr = define("λa b. a (not b) b")
 nil_expr = define("[]")
 is_nil_expr = define("λxs. eq xs nil")
 
-A = fresh_generic_type("A")
-B = fresh_generic_type("B")
-def builtin_lfold(xs: list[A], acc: B, f: Callable[[B, A], A]) -> B: # type: ignore[reportInvalidTypeForm]
+def builtin_lfold(xs, acc, f):
     for elem in xs:
         acc = f(acc, elem)
     return acc
 
-A = fresh_generic_type("A")
-B = fresh_generic_type("B")
-def builtin_rfold(xs: list[A], f: Callable[[A, B], B], acc: B) -> B: # type: ignore[reportInvalidTypeForm]
+def builtin_rfold(xs, f, acc):
     for elem in reversed(xs):
         acc = f(elem, acc)
     return acc
@@ -189,70 +175,63 @@ def builtin_rfold(xs: list[A], f: Callable[[A, B], B], acc: B) -> B: # type: ign
 map_expr = define("λxs f. rfold xs (λx acc. cons (f x) acc) nil")
 filter_expr = define("λxs f. lfold xs nil (λacc x. (f x) (cons x acc) acc)")
 
-T = fresh_generic_type("T")
-def builtin_zip(xs1: list[T], xs2: list[T]) -> list[list[T]]: # type: ignore[reportInvalidTypeForm]
+def builtin_zip(xs1, xs2):
     return list(map(list, zip(xs1, xs2)))
 
-def builtin_length(x) -> int: # type: ignore[reportInvalidTypeForm]
+def builtin_length(x):
     return len(x)
 
-def builtin_range(start: int, end: int):
+def builtin_range(start, end):
     return list(range(start, end))
 
-T = fresh_generic_type("T")
-def builtin_cons(x: T, xs: list[T]) -> list[T]: # type: ignore[reportInvalidTypeForm]
+def builtin_cons(x, xs):
     return [x] + xs
 
-T = fresh_generic_type("T")
-def builtin_head(xs: list[T]) -> T: # type: ignore[reportInvalidTypeForm]
+def builtin_head(xs):
     return xs[0]
 
-T = fresh_generic_type("T")
-def builtin_tail(xs: list[T]) -> list[T]: # type: ignore[reportInvalidTypeForm]
+def builtin_tail(xs):
     return xs[1:]
 
-T = fresh_generic_type("T")
-def builtin_append(xs: list[T], x: T) -> list[T]: # type: ignore[reportInvalidTypeForm]
+def builtin_append(xs, x):
     return xs + [x]
 
-T = fresh_generic_type("T")
-def builtin_reverse(xs: list[T]) -> list[T]: # type: ignore[reportInvalidTypeForm]
+def builtin_reverse(xs):
     return list(reversed(xs))
 
-T = fresh_generic_type("T")
-def builtin_sort(xs: list[T]) -> list[T]: # type: ignore[reportInvalidTypeForm]
+def builtin_sort(xs):
     return sorted(xs)
 
 ### String manipulation primitives
 
 String = list[str]
 
-def split(s: str) -> String:
+def split(s):
     return list(s)
 
-def join(s: String) -> str:
+def join(s):
     return "".join(s)
 
-def builtin_str_concat(s1: String, s2: String) -> String:
+def builtin_str_concat(s1, s2):
     return s1 + s2
 
-def builtin_substring(s: String, start: int, end: int) -> String:
+def builtin_substring(s, start, end):
     return s[start:end]
 
-def builtin_split(s: String, sep: Optional[String] = None) -> list[String]:
+def builtin_split(s, sep=None):
     if sep is not None:
-        sep: Optional[str] = join(sep)
+        sep = join(sep)
     return list(map(split, join(s).split(sep)))
 
-def builtin_join(lst: list[String], sep: String) -> String:
+def builtin_join(lst, sep):
     return split(join(sep).join(map(join, lst)))
 
 ### Conversion primitives
 
-def builtin_to_str(x) -> String:
+def builtin_to_str(x):
     return split(str(x))
 
-def builtin_to_int(s: String) -> int:
+def builtin_to_int(s):
     return int(join(s))
 
 ### Utility/functional primitives
@@ -267,7 +246,8 @@ def builtin_compose(f, g):
     return lambda x: f(g(x))
 
 BUILTINS = {
-    "Y": y_combinator_expr,
+    "True": true_expr,
+    "False": false_expr,
     # arithmetic
     "add": external_fn(builtin_add),
     "mul": external_fn(builtin_mul),
@@ -316,3 +296,61 @@ BUILTINS = {
     "id": id_expr,
     "compose": external_fn(builtin_compose),
 }
+
+BUILTIN_SCHEMES = {
+    # Arithmetic primitives
+    "add":     poly_type("T -> T -> T"),
+    "mul":     poly_type("T -> T -> T"),
+    "sub":     poly_type("T -> T -> T"),
+    "div":     poly_type("T -> T -> T"),
+    "mod":     poly_type("T -> T -> T"),
+    "pow":     poly_type("T -> T -> T"),
+    # Comparisons
+    "if":      poly_type("T -> A -> B"),
+    "eq":      poly_type("T -> T -> Bool"),
+    "neq":     poly_type("T -> T -> Bool"),
+    "gt":      poly_type("T -> T -> Bool"),
+    "lt":      poly_type("T -> T -> Bool"),
+    "geq":     poly_type("T -> T -> Bool"),
+    "leq":     poly_type("T -> T -> Bool"),
+    # Boolean operators
+    "True":    poly_type("Bool"),
+    "False":   poly_type("Bool"),
+    "not":     poly_type("Bool -> Bool"),
+    "and":     poly_type("Bool -> Bool -> Bool"),
+    "or":      poly_type("Bool -> Bool -> Bool"),
+    # List utilities
+    "nil":     poly_type("List T"),
+    "is_nil":  poly_type("List T -> Bool"),
+    "lfold":   poly_type("List A -> B -> (B -> A -> A) -> B"),
+    "rfold":   poly_type("List A -> (A -> B -> B) -> B -> B"),
+    "map":     poly_type("List A -> (A -> B) -> List B"),
+    "filter":  poly_type("List A -> (A -> Bool) -> List A"),
+    "zip":     poly_type("List T -> List T -> List (List T)"),
+    "length":  poly_type("List A -> Int"),
+    "range":   poly_type("Int -> Int -> List Int"),
+    "cons":    poly_type("T -> List T -> List T"),
+    "head":    poly_type("List T -> T"),
+    "tail":    poly_type("List T -> List T"),
+    "append":  poly_type("List T -> T -> List T"),
+    "reverse": poly_type("List T -> List T"),
+    "sort":    poly_type("List T -> List T"),
+    # String manipulation
+    "concat":  poly_type("String -> String -> String"),
+    "substr":  poly_type("String -> Int -> Int -> String"),
+    "split":   poly_type("String -> String -> List String"),
+    "join":    poly_type("List String -> String -> String"),
+    # Conversion
+    "to_str":  poly_type("T -> String"),
+    "to_int":  poly_type("String -> Int"),
+    # Utility/functional
+    "print":   poly_type("T -> T"),
+    "id":      poly_type("A -> A"),
+    "compose": poly_type("(B -> C) -> (A -> B) -> A -> C"),
+}
+
+# Safeguard for missing schemes (type checker really doesn't like when that happens)
+for k in BUILTINS.keys():
+    if k not in BUILTIN_SCHEMES:
+        print(f"{k} missing scheme")
+        exit(1)

@@ -1,6 +1,6 @@
 from .helpers import load_model, IS_MACOS, MODEL_DIR
 from .eval import evaluate
-from .dsl import UOp, ExternalError
+from .dsl import UOp, ExternalError, pretty_print
 from .typing import infer, Type
 from .parser import parse
 import os
@@ -18,5 +18,6 @@ __all__ = [
     "Type",
     "parse",
     "infer",
-    "evaluate"
+    "evaluate",
+    "pretty_print"
 ]

@@ -84,3 +84,52 @@ class Type:
                 return f"{str(self.params[0])} List"
             case T.Arrow:
                 return " -> ".join(map(str, self.params))
+
+    def free_vars(self) -> set:
+        if isinstance(self, TVar):
+            return {self}
+        ft = set()
+        for t in self.params:
+            ft |= t.free_vars()
+        return ft
+
+    @staticmethod
+    def arrow(params_ty: list["Type"], body_ty: "Type") -> "Type":
+        """Right-fold for function types: param1 -> param2 -> ... -> body"""
+        func_ty = body_ty
+        for pt in reversed(params_ty):
+            func_ty = Type(T.Arrow, [pt, func_ty])
+        return func_ty
+
+@dataclass(eq=True, frozen=True)
+class TVar(Type):
+    name: str
+    generic: bool = False
+
+    def __repr__(self):
+        s = self.name
+        if self.generic:
+            # Strip numeric suffix
+            while s[-1].isnumeric():
+                s = s[:-1]
+        return s
+
+@dataclass(eq=True, frozen=True)
+class Scheme:
+    vars: list[TVar]
+    ty: Type
+
+    def free_vars(self) -> set:
+        # Free type variables in a scheme are those free in its type minus the quantified ones.
+        return self.ty.free_vars() - set(self.vars)
+
+def pretty_print(expr) -> str:
+    if isinstance(expr, str):
+        return expr
+    if isinstance(expr, list) and len(expr) > 0:
+        p = (pretty_print(e) for e in expr)
+        if isinstance(expr[0], str):
+            return '"' + "".join(p) + '"'
+        else:
+            return "[" + ", ".join(p) + "]"
+    return str(expr)
