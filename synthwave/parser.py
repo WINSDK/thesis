@@ -72,7 +72,11 @@ class Parser():
 
     def parse_primitive(self, t):
         match t.kind:
-            case "INT" | "FLOAT" | "BOOL":
+            case "BOOL":
+                self.next()
+                prim = eval(t.val)
+                return true_expr if prim else false_expr
+            case "INT" | "FLOAT":
                 self.next()
                 return eval(t.val)
             case "CHAR" | "STRING":
@@ -167,5 +171,8 @@ def parse(src: str) -> UOp:
     p = Parser(tokens=tokenize(src))
     expr = p.parse_expr()
     if p.next() is not None:
-        raise SyntaxError("Generic syntax error")
+        raise SyntaxError()
     return reduce_redundant(expr)
+
+true_expr = parse("λt f. t")
+false_expr = parse("λt f. f")

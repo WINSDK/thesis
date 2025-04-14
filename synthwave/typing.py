@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any, Dict, Tuple, Optional
 from enum import auto, IntEnum
 import typing
@@ -16,11 +17,11 @@ class T(IntEnum):
     List = auto()
     Arrow = auto()
 
-PRIMITIVES = (T.Int, T.Bool, T.List)
+PRIMITIVES = [t.value for t in T if t.value not in [T.Var, T.List, T.Arrow]]
 
 class Type():
     t: T
-    params: list[Any] = [] # str or type
+    params: list["Type"]
 
     def __init__(self, t: T, params: Optional[list[Any]] = None):
         self.t = t
@@ -44,15 +45,30 @@ class Type():
             case T.Var:
                 return str(self.params[0])
 
-def apply_subst(ty: Type, subst: Dict[Type, Type]) -> Type:
-    if ty.t == T.Var and ty in subst:
-        return apply_subst(subst[ty], subst)
+@dataclass(eq=True, frozen=True)
+class TVar(Type):
+    name: str
+
+Subst = Dict[TVar, Type]
+
+def arrow_of_list(params_ty: list[Type], body_ty: Type) -> Type:
+    """Rfold for function types param1 -> param2 -> ... -> body"""
+    func_ty = body_ty
+    for pt in reversed(params_ty):
+        func_ty = Type(T.Arrow, [pt, func_ty])
+    return func_ty
+
+def apply_subst(ty: Type, subst: Subst) -> Type:
+    if isinstance(ty, TVar):
+        if ty in subst:
+            return apply_subst(subst[ty], subst)
+        return ty
     elif ty.t == T.Arrow:
         return Type(T.Arrow, [apply_subst(t, subst) for t in ty.params])
     else:
         return ty
 
-def occurs_in_type(tv: Type, ty: Type, subst: Dict[Type, Type]) -> bool:
+def occurs_in_type(tv: Type, ty: Type, subst: Subst) -> bool:
     ty = apply_subst(ty, subst)
     if ty == tv:
         return True
@@ -61,8 +77,8 @@ def occurs_in_type(tv: Type, ty: Type, subst: Dict[Type, Type]) -> bool:
     else:
         return False
 
-def var_bind(tv: Type, ty: Type, subst: Dict[Type, Type]) -> Dict[Type, Type]:
-    """Bind the type var 'tv' to type 'ty' if allowed,"""
+def var_bind(tv: TVar, ty: Type, subst: Subst) -> Subst:
+    """Bind the type var 'tv' to type 'ty' if allowed"""
     if tv == ty:
         return subst
     # Cannot bind a type variable to a type that contains it
@@ -73,21 +89,20 @@ def var_bind(tv: Type, ty: Type, subst: Dict[Type, Type]) -> Dict[Type, Type]:
     subst[tv] = ty
     return subst
 
-def unify(t1: Type, t2: Type, subst: Dict[Type, Type]) -> Dict[Type, Type]:
-    """Unify t1 and t2 under the existing substitution 'subst',"""
+def unify(t1: Type, t2: Type, subst: Subst) -> Subst:
+    """Unify t1 and t2 under the existing subst"""
     # 1) Apply current subst so we see the "true" forms
     t1 = apply_subst(t1, subst)
     t2 = apply_subst(t2, subst)
     # 2) Pattern-match on t1, t2
-    if t1.t == T.Var:
+    if isinstance(t1, TVar):
         return var_bind(t1, t2, subst)
-    elif t2.t == T.Var:
+    elif isinstance(t2, TVar):
         return var_bind(t2, t1, subst)
-    # This must be manually modified for each new base type
     elif any(t1.t == t and t2.t == t for t in PRIMITIVES):
         return subst
-    elif t1.t == T.Arrow and t2.t == T.Arrow:
-        # assert len(t1.params) == len(t2.params)
+    elif t1.t == t2.t:
+        # This is fine, so long as types have fixed number of args
         for t1, t2 in zip(t1.params, t2.params):
             subst = unify(t1, t2, subst)
         return subst
@@ -97,10 +112,9 @@ def unify(t1: Type, t2: Type, subst: Dict[Type, Type]) -> Dict[Type, Type]:
 def fresh_type_var(prefix="a", counter=[0]) -> Type:
     name = f"{prefix}{counter[0]}"
     counter[0] += 1
-    return Type(T.Var, [name])
+    return TVar(name)
 
 def infer_py_ty(ty, expr=None) -> Type:
-    varname = ty.__name__
     if ty is int:
         return Type(T.Int)
     if ty is bool:
@@ -121,11 +135,11 @@ def infer_py_ty(ty, expr=None) -> Type:
     elif typing.get_origin(ty) is Callable:
         params_ty, body_ty = typing.get_args(ty)
         params_ty = [infer_py_ty(p) for p in params_ty]
-        return Type(T.Arrow, [*params_ty, infer_py_ty(body_ty)])
+        return arrow_of_list(params_ty, infer_py_ty(body_ty))
     else:
-        raise TypeError(f"Type '{varname}' isn't supported (yet)")
+        raise TypeError(f"Type {ty.__name__} isn't supported (yet)")
 
-def _infer(expr: UOp, env: Dict[str, Type], subst: Dict[Type, Type]) -> Tuple[Type, Dict[Type, Type]]:
+def _infer(expr: UOp, env: Subst, subst: Subst) -> Tuple[Type, Subst]:
     def lookup(varname):
         if varname in env:
             # The type in env might be partially substituted
@@ -155,43 +169,41 @@ def _infer(expr: UOp, env: Dict[str, Type], subst: Dict[Type, Type]) -> Tuple[Ty
             # We create a fresh type variable for each param
             # or you might do something fancy if param type is annotated
             env = env.copy()
-            param_tys = []
+            params_ty = []
             for p in params:
                 tv = fresh_type_var()
                 env[p] = tv
-                param_tys.append(tv)
+                params_ty.append(tv)
             # Infer body with those param types in env
             (body_ty, subst) = _infer(body, env, subst)
-            ty = Type(T.Arrow, [*param_tys, body_ty])
+            ty = arrow_of_list(params_ty, body_ty)
             return (ty, subst)
         case Ops.Appl:
             func, *args = expr.args
             # 1. Infer the type of func
             (func_ty, subst) = _infer(func, env, subst)
-            for idx, arg in enumerate(args):
-                # Infer its type and unify it with the corresponding parameter type.
+            for arg in args:
+                # The function must be an arrow: param_type -> result_type
+                param_ty = fresh_type_var()
+                result_ty = fresh_type_var()
+                subst = unify(func_ty, Type(T.Arrow, [param_ty, result_ty]), subst)
+                # Infer arg type
                 (arg_ty, subst) = _infer(arg, env, subst)
-                param_ty = apply_subst(func_ty.params[idx], subst)
+                # Unify arg type with param
                 subst = unify(arg_ty, param_ty, subst)
-            # Determine the type of the application.
-            if len(args) == len(func_ty.params) - 1:
-                # Fully applied, so last type is the return type
-                result_ty = apply_subst(func_ty.params[-1], subst)
-            else:
-                # Partial application: function is missing for the remaining args.
-                remaining_tys = func_ty.params[len(args):]
-                result_ty = Type(T.Arrow, remaining_tys)
-            return (result_ty, subst)
+                func_ty = result_ty
+            # After applying all arguments, func_ty is the final type of the application
+            return (apply_subst(func_ty, subst), subst)
         case Ops.External:
             *params, body = expr.args
-            param_tys = body.__annotations__
-            assert "return" in param_tys, \
-                  f"Function '{body.__name__}' missing return type annotation"
-            assert len(fn_parameters(body)) + 1 == len(param_tys), \
-                  f"Function '{body.__name__}' missing parameter annotations"
-            body_ty = infer_py_ty(param_tys["return"])
-            param_tys = [infer_py_ty(param_tys[p]) for p in params]
-            ty = Type(T.Arrow, [*param_tys, body_ty])
+            params_ty = body.__annotations__
+            if "return" not in params_ty:
+                raise TypeError(f"Missing type information for: {body.__name__}")
+            if len(fn_parameters(body)) + 1 != len(params_ty):
+                raise TypeError(f"Missing type information for: {body.__name__}")
+            body_ty = infer_py_ty(params_ty["return"])
+            params_ty = [infer_py_ty(params_ty[p]) for p in params]
+            ty = arrow_of_list(params_ty, body_ty)
             return (ty, subst)
 
 def infer(expr) -> Type:

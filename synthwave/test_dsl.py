@@ -1,7 +1,7 @@
 import pytest
 from synthwave.typing import infer
 from synthwave.dsl import UOp, Ops
-from synthwave.eval import evaluate
+from synthwave.eval import evaluate, define
 from synthwave.parser import parse
 
 
@@ -146,27 +146,15 @@ def test_partial_appl_chain():
     assert evaluate(step4) == 42
 
 def test_map_add5():
-    # map (add 5) [1,2,3] => Int -> Int
-    # Partially applying `add` with 5
-    expr = UOp(Ops.Appl, [
-        UOp(Ops.Appl, [
-            var("map"),
-            UOp(Ops.Appl, [
-                var("add"),
-                val(5),
-            ])
-        ]),
-        val([1, 2, 3]),
-    ])
-    assert evaluate(expr) == [6, 7, 8]
+    # map [1,2,3] (add 5) => Int List
+    assert define("map [1,2,3] (add 5)") == [6, 7, 8]
 
 def test_sort_then_reverse():
-    expr = parse("reverse (sort [3, 1, 2])")
-    assert evaluate(expr) == [3, 2, 1]
+    assert define("reverse (sort [3, 1, 2])") == [3, 2, 1]
 
 def test_sort_reverse_map():
-    expr = parse("reverse (sort (map (Lx. add 3 (mul x 2)) [1, 5, 10, 30]))")
-    assert evaluate(expr) == [63, 23, 13, 5]
+    expr = define("reverse (sort (map [1, 5, 10, 30] (Lx. add 3 (mul x 2))))")
+    assert expr == [63, 23, 13, 5]
 
 def test_closure_call():
     inc = UOp(Ops.Closure, [
@@ -219,10 +207,7 @@ def test_infer_val():
 def test_infer_abstr_single():
     # λx. x + 1 => Int -> Int
     # Because x must be an Int to do (x + 1).
-    expr = UOp(Ops.Abstr, [
-        "x",
-        UOp(Ops.Appl, [var("add"), var("x"), val(1)])
-    ])
+    expr = define("(λx. add x 1)")
     ty = infer(expr)
     assert str(ty) == "Int -> Int"
 
@@ -321,17 +306,8 @@ def test_infer_type_error():
         f"Expected unification error message, got {excinfo.value}"
 
 def test_infer_map_add5():
-    # map (add 5) [1,2,3] => Int List
+    # map [1, 2, 3] (add 5) => Int List
     # Partially applying `add` with 5
-    expr = UOp(Ops.Appl, [
-        UOp(Ops.Appl, [
-            var("map"),
-            UOp(Ops.Appl, [
-                var("add"),
-                val(5),
-            ])
-        ]),
-        val([1, 2, 3]),
-    ])
+    expr = define("map [1, 2, 3] (add 5)")
     ty = infer(expr)
     assert str(ty) == "Int List"
