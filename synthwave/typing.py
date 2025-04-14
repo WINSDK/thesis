@@ -9,7 +9,6 @@ from .dsl import UOp, Ops
 
 
 class T(IntEnum):
-    Var = auto()
     Int = auto()
     Float = auto()
     Char = auto()
@@ -17,7 +16,7 @@ class T(IntEnum):
     List = auto()
     Arrow = auto()
 
-PRIMITIVES = [t.value for t in T if t.value not in [T.Var, T.List, T.Arrow]]
+PRIMITIVES = [t.value for t in T if t.value not in [T.List, T.Arrow]]
 
 class Type():
     t: T
@@ -42,12 +41,13 @@ class Type():
                 return f"{str(self.params[0])} List"
             case T.Arrow:
                 return " -> ".join(map(str, self.params))
-            case T.Var:
-                return str(self.params[0])
 
 @dataclass(eq=True, frozen=True)
 class TVar(Type):
     name: str
+
+    def __repr__(self):
+        return self.name
 
 Subst = Dict[TVar, Type]
 
