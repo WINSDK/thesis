@@ -147,14 +147,16 @@ def test_partial_appl_chain():
 
 def test_map_add5():
     # map [1,2,3] (add 5) => Int List
-    assert define("map [1,2,3] (add 5)") == [6, 7, 8]
+    expr = define("map [1,2,3] (add 5)")
+    assert expr.args[0] == [6, 7, 8]
 
 def test_sort_then_reverse():
-    assert define("reverse (sort [3, 1, 2])") == [3, 2, 1]
+    expr = define("reverse (sort [3, 1, 2])")
+    assert expr.args[0] == [3, 2, 1]
 
 def test_sort_reverse_map():
     expr = define("reverse (sort (map [1, 5, 10, 30] (Lx. add 3 (mul x 2))))")
-    assert expr == [63, 23, 13, 5]
+    assert expr.args[0] == [63, 23, 13, 5]
 
 def test_closure_call():
     inc = UOp(Ops.Closure, [
@@ -233,7 +235,9 @@ def test_infer_abstr_multi():
         UOp(Ops.Appl, [var("add"), var("x"), var("y")])
     ])
     ty = infer(expr)
-    assert str(ty) == "Int -> Int -> Int"
+    assert len(ty.params) == 2
+    t1 = ty.params[0]
+    assert str(ty) == f"{t1} -> {t1} -> {t1}"
 
 def test_infer_appl_multi():
     # (λx y. x * y) 6 7 => Int

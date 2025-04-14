@@ -1,6 +1,6 @@
 from collections.abc import Callable
 from typing import Dict, Optional
-from .dsl import UOp, Ops, ExternalError
+from .dsl import UOp, Ops, ExternalError, fresh_generic_type
 from .helpers import fn_parameters
 from .parser import parse
 
@@ -76,10 +76,14 @@ def external_fn(f: Callable):
     params = fn_parameters(f)
     return UOp(Ops.External, [*params, f])
 
-def define(e):
+def define(e: str) -> UOp:
     # Can't just `parse` sometimes. Some expressions require being evaluated
     # into closures: these can be abstractions or externals.
-    return evaluate(parse(e))
+    expr = evaluate(parse(e))
+    if isinstance(expr, UOp):
+        return expr
+    else:
+        return UOp(Ops.Val, [expr])
 
 y_combinator_expr = define("λf. (λx. f (x x)) (λx. f (x x))")
 
@@ -88,22 +92,28 @@ false_expr = define("False")
 
 ### Arithmetic primitives
 
-def builtin_add(x: int, y: int) -> int:
+T = fresh_generic_type("T")
+def builtin_add(x: T, y: T) -> T: # type: ignore[reportInvalidTypeForm]
     return x + y
 
-def builtin_mul(x: int, y: int) -> int:
+T = fresh_generic_type("T")
+def builtin_mul(x: T, y: T) -> T: # type: ignore[reportInvalidTypeForm]
     return x * y
 
-def builtin_sub(x: int, y: int) -> int:
+T = fresh_generic_type("T")
+def builtin_sub(x: T, y: T) -> T: # type: ignore[reportInvalidTypeForm]
     return x - y
 
-def builtin_div(x: int, y: int) -> int:
+T = fresh_generic_type("T")
+def builtin_div(x: T, y: T) -> T: # type: ignore[reportInvalidTypeForm]
     return x // y
 
-def builtin_mod(x: int, y: int) -> int:
+T = fresh_generic_type("T")
+def builtin_mod(x: T, y: T) -> T: # type: ignore[reportInvalidTypeForm]
     return x % y
 
-def builtin_pow(x: int, y: int) -> int:
+T = fresh_generic_type("T")
+def builtin_pow(x: T, y: T) -> T: # type: ignore[reportInvalidTypeForm]
     return x ** y
 
 ### Comparison primitives
@@ -113,22 +123,28 @@ if_expr = define("λc t e. c t e")
 def church_bool(cond: bool) -> UOp:
     return true_expr if cond else false_expr
 
-def builtin_eq(x, y) -> UOp:
+T = fresh_generic_type("T")
+def builtin_eq(x: T, y: T) -> UOp: # type: ignore[reportInvalidTypeForm]
     return church_bool(x == y)
 
-def builtin_neq(x, y) -> UOp:
+T = fresh_generic_type("T")
+def builtin_neq(x: T, y: T) -> UOp: # type: ignore[reportInvalidTypeForm]
     return church_bool(x != y)
 
-def builtin_gt(x, y) -> UOp:
+T = fresh_generic_type("T")
+def builtin_gt(x: T, y: T) -> UOp: # type: ignore[reportInvalidTypeForm]
     return church_bool(x > y)
 
-def builtin_lt(x, y) -> UOp:
+T = fresh_generic_type("T")
+def builtin_lt(x: T, y: T) -> UOp: # type: ignore[reportInvalidTypeForm]
     return church_bool(x < y)
 
-def builtin_geq(x, y) -> UOp:
+T = fresh_generic_type("T")
+def builtin_geq(x: T, y: T) -> UOp: # type: ignore[reportInvalidTypeForm]
     return church_bool(x <= y) # Swapped cause of ordering
 
-def builtin_leq(x, y) -> UOp:
+T = fresh_generic_type("T")
+def builtin_leq(x: T, y: T) -> UOp: # type: ignore[reportInvalidTypeForm]
     return church_bool(x >= y)
 
 ### Boolean/logical operators
@@ -143,13 +159,17 @@ nil_expr = define("[]")
 is_nil_expr = define("λxs. eq xs nil")
 
 # 'a list -> 'acc -> ('acc -> 'a -> 'acc) -> 'acc
-def builtin_lfold(xs, acc, f):
+A = fresh_generic_type("A")
+B = fresh_generic_type("ACC")
+def builtin_lfold(xs: list[A], acc: B, f: Callable[[B, A], A]) -> B: # type: ignore[reportInvalidTypeForm]
     for elem in xs:
         acc = f(acc, elem)
     return acc
 
 # 'a list -> ('a -> 'acc -> 'acc) -> 'acc -> 'acc
-def builtin_rfold(xs: list[int], f: Callable[[int, int], int], acc: int) -> int:
+A = fresh_generic_type("A")
+B = fresh_generic_type("ACC")
+def builtin_rfold(xs: list[A], f: Callable[[A, B], B], acc: B) -> B: # type: ignore[reportInvalidTypeForm]
     for elem in reversed(xs):
         acc = f(elem, acc)
     return acc
@@ -157,31 +177,38 @@ def builtin_rfold(xs: list[int], f: Callable[[int, int], int], acc: int) -> int:
 map_expr = define("λxs f. rfold xs (λx acc. cons (f x) acc) nil")
 filter_expr = define("λxs f. lfold xs nil (λacc x. (f x) (cons x acc) acc)")
 
-def builtin_zip(xs1, xs2):
+T = fresh_generic_type("T")
+def builtin_zip(xs1: list[T], xs2: list[T]) -> list[list[T]]: # type: ignore[reportInvalidTypeForm]
     return list(map(list, zip(xs1, xs2)))
 
-def builtin_length(x) -> int:
+def builtin_length(x) -> int: # type: ignore[reportInvalidTypeForm]
     return len(x)
 
 def builtin_range(start: int, end: int):
     return list(range(start, end))
 
-def builtin_cons(x: int, xs: list[int]) -> list[int]:
+T = fresh_generic_type("T")
+def builtin_cons(x: T, xs: list[T]) -> list[T]: # type: ignore[reportInvalidTypeForm]
     return [x] + xs
 
-def builtin_head(xs):
+T = fresh_generic_type("T")
+def builtin_head(xs: list[T]) -> T: # type: ignore[reportInvalidTypeForm]
     return xs[0]
 
-def builtin_tail(xs):
+T = fresh_generic_type("T")
+def builtin_tail(xs: list[T]) -> list[T]: # type: ignore[reportInvalidTypeForm]
     return xs[1:]
 
-def builtin_append(xs, x):
+T = fresh_generic_type("T")
+def builtin_append(xs: list[T], x: T) -> list[T]: # type: ignore[reportInvalidTypeForm]
     return xs + [x]
 
-def builtin_reverse(xs: list[int]) -> list[int]:
+T = fresh_generic_type("T")
+def builtin_reverse(xs: list[T]) -> list[T]: # type: ignore[reportInvalidTypeForm]
     return list(reversed(xs))
 
-def builtin_sort(xs: list[int]) -> list[int]:
+T = fresh_generic_type("T")
+def builtin_sort(xs: list[T]) -> list[T]: # type: ignore[reportInvalidTypeForm]
     return sorted(xs)
 
 ### String manipulation primitives
@@ -219,17 +246,15 @@ def builtin_to_int(s: String) -> int:
 ### Utility/functional primitives
 
 def builtin_print(x):
-    # Print for side-effect and also return the value.
     print(x)
     return x
 
 def builtin_identity(x):
     return x
 
-def builtin_compose(f: Callable, g: Callable) -> Callable:
+def builtin_compose(f, g):
     return lambda x: f(g(x))
 
-# Builtins dictionary: add both the original and new primitives.
 BUILTINS = {
     "Y": y_combinator_expr,
     # arithmetic

@@ -1,9 +1,19 @@
-from typing import Any
+from typing import Any, TypeAliasType
 from enum import auto, IntEnum
 from dataclasses import dataclass
 
 class ExternalError(Exception):
     pass
+
+GENERICS = set()
+
+def fresh_generic_type(name: str, counter=[0]):
+    assert len(name) != 0, "Generics must be named"
+    name = f"{name}{counter[0]}"
+    counter[0] += 1
+    ty = TypeAliasType(name, Any) # type: ignore[reportGeneralTypeIssues]
+    GENERICS.add(ty)
+    return ty
 
 class Ops(IntEnum):
     # Wrapped python value

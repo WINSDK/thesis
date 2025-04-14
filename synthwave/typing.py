@@ -5,7 +5,7 @@ from enum import auto, IntEnum
 import typing
 from .helpers import fn_parameters
 from .eval import BUILTINS
-from .dsl import UOp, Ops
+from .dsl import UOp, Ops, GENERICS
 
 
 class T(IntEnum):
@@ -20,7 +20,7 @@ PRIMITIVES = [t.value for t in T if t.value not in [T.List, T.Arrow]]
 
 class Type():
     t: T
-    params: list["Type"]
+    params: list["Type"] = []
 
     def __init__(self, t: T, params: Optional[list[Any]] = None):
         self.t = t
@@ -45,9 +45,15 @@ class Type():
 @dataclass(eq=True, frozen=True)
 class TVar(Type):
     name: str
+    generic: bool = False
 
     def __repr__(self):
-        return self.name
+        s = self.name
+        if self.generic:
+            # Strip numeric suffix
+            while s[-1].isnumeric():
+                s = s[:-1]
+        return s
 
 Subst = Dict[TVar, Type]
 
@@ -63,16 +69,18 @@ def apply_subst(ty: Type, subst: Subst) -> Type:
         if ty in subst:
             return apply_subst(subst[ty], subst)
         return ty
-    elif ty.t == T.Arrow:
-        return Type(T.Arrow, [apply_subst(t, subst) for t in ty.params])
+    elif len(ty.params) > 0:
+        return Type(ty.t, [apply_subst(t, subst) for t in ty.params])
     else:
         return ty
 
-def occurs_in_type(tv: Type, ty: Type, subst: Subst) -> bool:
+def occurs_in_type(tv: TVar, ty: Type, subst: Subst) -> bool:
     ty = apply_subst(ty, subst)
     if ty == tv:
         return True
-    elif ty.t == T.Arrow:
+    if isinstance(ty, TVar):
+        return False
+    elif len(ty.params) > 0:
         return any(occurs_in_type(tv, t, subst) for t in ty.params)
     else:
         return False
@@ -123,19 +131,27 @@ def infer_py_ty(ty, expr=None) -> Type:
         return Type(T.Float)
     if ty is str:
         return Type(T.Char)
+    if ty is Any:
+        return fresh_type_var()
     elif ty is list and expr is not None and len(expr) > 0:
         # Special case for list's, so that we can infer the type of
         # A value such as: Val([1, 2, 3]) => Int List
         return infer_py_ty(list[type(expr[0])])
-    elif ty is list or ty is Callable:
-        return Type(T.List, [fresh_type_var()])
     elif typing.get_origin(ty) is list:
+        # Infer based on function annotations
         elems = typing.get_args(ty)[0]
         return Type(T.List, [infer_py_ty(elems)])
     elif typing.get_origin(ty) is Callable:
+        # Infer based on function annotations
         params_ty, body_ty = typing.get_args(ty)
         params_ty = [infer_py_ty(p) for p in params_ty]
         return arrow_of_list(params_ty, infer_py_ty(body_ty))
+    elif ty is list:
+        return Type(T.List, [fresh_type_var()])
+    elif ty is Callable:
+        return Type(T.Arrow, [fresh_type_var(), fresh_type_var()])
+    elif ty in GENERICS:
+        return TVar(str(ty), generic=True)
     else:
         raise TypeError(f"Type {ty.__name__} isn't supported (yet)")
 
@@ -149,7 +165,7 @@ def _infer(expr: UOp, env: Subst, subst: Subst) -> Tuple[Type, Subst]:
             # don't require substitution
             return _infer(BUILTINS[varname], env, subst)
         else:
-            raise NameError(f"Unbound variable: {varname}")
+            raise NameError(f"Unbound variable {varname}")
     match expr.op:
         case Ops.Val:
             ty = type(expr.args[0])
@@ -157,7 +173,12 @@ def _infer(expr: UOp, env: Subst, subst: Subst) -> Tuple[Type, Subst]:
         case Ops.Var:
             return lookup(expr.args[0])
         case Ops.Closure:
-            *args, body, _ = expr.args
+            *args, body, closure = expr.args
+            # Merge captured env into the type inference env
+            env = env.copy()
+            for k, v in closure.items():
+                v_ty, subst = _infer(UOp(Ops.Val, [v]), env, subst)
+                env[k] = v_ty
             if isinstance(body, UOp):
                 body = UOp(Ops.Abstr, [*args, body])
                 return _infer(body, env, subst)
@@ -178,6 +199,21 @@ def _infer(expr: UOp, env: Subst, subst: Subst) -> Tuple[Type, Subst]:
             (body_ty, subst) = _infer(body, env, subst)
             ty = arrow_of_list(params_ty, body_ty)
             return (ty, subst)
+        case Ops.External:
+            *params, body = expr.args
+            params_ty = body.__annotations__
+            if "return" not in params_ty:
+                params_ty["return"] = fresh_type_var()
+                # raise TypeError(f"Missing type information for: {body.__name__}")
+            if len(fn_parameters(body)) + 1 != len(params_ty):
+                for p in fn_parameters(body):
+                    if p not in params_ty:
+                        params_ty[p] = fresh_type_var()
+                # raise TypeError(f"Missing type information for: {body.__name__}")
+            body_ty = infer_py_ty(params_ty["return"])
+            params_ty = [infer_py_ty(params_ty[p]) for p in params]
+            ty = arrow_of_list(params_ty, body_ty)
+            return (ty, subst)
         case Ops.Appl:
             func, *args = expr.args
             # 1. Infer the type of func
@@ -193,18 +229,7 @@ def _infer(expr: UOp, env: Subst, subst: Subst) -> Tuple[Type, Subst]:
                 subst = unify(arg_ty, param_ty, subst)
                 func_ty = result_ty
             # After applying all arguments, func_ty is the final type of the application
-            return (apply_subst(func_ty, subst), subst)
-        case Ops.External:
-            *params, body = expr.args
-            params_ty = body.__annotations__
-            if "return" not in params_ty:
-                raise TypeError(f"Missing type information for: {body.__name__}")
-            if len(fn_parameters(body)) + 1 != len(params_ty):
-                raise TypeError(f"Missing type information for: {body.__name__}")
-            body_ty = infer_py_ty(params_ty["return"])
-            params_ty = [infer_py_ty(params_ty[p]) for p in params]
-            ty = arrow_of_list(params_ty, body_ty)
-            return (ty, subst)
+            return (func_ty, subst)
 
 def infer(expr) -> Type:
     if isinstance(expr, UOp):
