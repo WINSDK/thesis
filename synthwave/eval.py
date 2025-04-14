@@ -1,6 +1,6 @@
 from collections.abc import Callable
-from typing import Dict, Optional
-from .dsl import UOp, Ops, ExternalError, fresh_generic_type
+from typing import Dict, Optional, TypeAliasType, Any
+from .dsl import UOp, Ops, ExternalError
 from .helpers import fn_parameters
 from .parser import parse
 
@@ -76,14 +76,23 @@ def external_fn(f: Callable):
     params = fn_parameters(f)
     return UOp(Ops.External, [*params, f])
 
+GENERICS = set()
+
+def fresh_generic_type(name: str, counter=[0]):
+    assert len(name) != 0, "Generics must be named"
+    name = f"{name}{counter[0]}"
+    counter[0] += 1
+    ty = TypeAliasType(name, Any) # type: ignore[reportGeneralTypeIssues]
+    GENERICS.add(ty)
+    return ty
+
 def define(e: str) -> UOp:
     # Can't just `parse` sometimes. Some expressions require being evaluated
     # into closures: these can be abstractions or externals.
     expr = evaluate(parse(e))
-    if isinstance(expr, UOp):
-        return expr
-    else:
-        return UOp(Ops.Val, [expr])
+    if not isinstance(expr, UOp):
+        expr = UOp(Ops.Val, [expr])
+    return expr
 
 y_combinator_expr = define("λf. (λx. f (x x)) (λx. f (x x))")
 
@@ -124,27 +133,31 @@ def church_bool(cond: bool) -> UOp:
     return true_expr if cond else false_expr
 
 T = fresh_generic_type("T")
-def builtin_eq(x: T, y: T) -> UOp: # type: ignore[reportInvalidTypeForm]
+def builtin_eq(x: T, y: T): # type: ignore[reportInvalidTypeForm]
+    if isinstance(x, UOp) and isinstance(x, UOp):
+        return and_expr(x, y)
     return church_bool(x == y)
 
 T = fresh_generic_type("T")
-def builtin_neq(x: T, y: T) -> UOp: # type: ignore[reportInvalidTypeForm]
-    return church_bool(x != y)
+def builtin_neq(x: T, y: T): # type: ignore[reportInvalidTypeForm]
+    if isinstance(x, UOp) and isinstance(x, UOp):
+        return xor_expr(x, y)
+    return not builtin_eq(x, y)
 
 T = fresh_generic_type("T")
-def builtin_gt(x: T, y: T) -> UOp: # type: ignore[reportInvalidTypeForm]
+def builtin_gt(x: T, y: T): # type: ignore[reportInvalidTypeForm]
     return church_bool(x > y)
 
 T = fresh_generic_type("T")
-def builtin_lt(x: T, y: T) -> UOp: # type: ignore[reportInvalidTypeForm]
+def builtin_lt(x: T, y: T): # type: ignore[reportInvalidTypeForm]
     return church_bool(x < y)
 
 T = fresh_generic_type("T")
-def builtin_geq(x: T, y: T) -> UOp: # type: ignore[reportInvalidTypeForm]
+def builtin_geq(x: T, y: T): # type: ignore[reportInvalidTypeForm]
     return church_bool(x <= y) # Swapped cause of ordering
 
 T = fresh_generic_type("T")
-def builtin_leq(x: T, y: T) -> UOp: # type: ignore[reportInvalidTypeForm]
+def builtin_leq(x: T, y: T): # type: ignore[reportInvalidTypeForm]
     return church_bool(x >= y)
 
 ### Boolean/logical operators
@@ -152,23 +165,22 @@ def builtin_leq(x: T, y: T) -> UOp: # type: ignore[reportInvalidTypeForm]
 not_expr = define("λp. p False True")
 and_expr = define("λp q. p q False")
 or_expr = define("λp q. p True q")
+xor_expr = define("λa b. a (not b) b")
 
 ### List and collection utilities
 
 nil_expr = define("[]")
 is_nil_expr = define("λxs. eq xs nil")
 
-# 'a list -> 'acc -> ('acc -> 'a -> 'acc) -> 'acc
 A = fresh_generic_type("A")
-B = fresh_generic_type("ACC")
+B = fresh_generic_type("B")
 def builtin_lfold(xs: list[A], acc: B, f: Callable[[B, A], A]) -> B: # type: ignore[reportInvalidTypeForm]
     for elem in xs:
         acc = f(acc, elem)
     return acc
 
-# 'a list -> ('a -> 'acc -> 'acc) -> 'acc -> 'acc
 A = fresh_generic_type("A")
-B = fresh_generic_type("ACC")
+B = fresh_generic_type("B")
 def builtin_rfold(xs: list[A], f: Callable[[A, B], B], acc: B) -> B: # type: ignore[reportInvalidTypeForm]
     for elem in reversed(xs):
         acc = f(elem, acc)
@@ -249,8 +261,7 @@ def builtin_print(x):
     print(x)
     return x
 
-def builtin_identity(x):
-    return x
+id_expr = define("λx. x")
 
 def builtin_compose(f, g):
     return lambda x: f(g(x))
@@ -302,6 +313,6 @@ BUILTINS = {
     "to_int": external_fn(builtin_to_int),
     # Utility/functional
     "print": external_fn(builtin_print),
-    "id": external_fn(builtin_identity),
+    "id": id_expr,
     "compose": external_fn(builtin_compose),
 }

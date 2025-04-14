@@ -1,46 +1,11 @@
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Dict, Tuple, Optional
-from enum import auto, IntEnum
+from typing import Any, Dict, Tuple
 import typing
-from .helpers import fn_parameters
-from .eval import BUILTINS
-from .dsl import UOp, Ops, GENERICS
-
-
-class T(IntEnum):
-    Int = auto()
-    Float = auto()
-    Char = auto()
-    Bool = auto()
-    List = auto()
-    Arrow = auto()
+from .eval import BUILTINS, GENERICS
+from .dsl import UOp, Ops, T, Type
 
 PRIMITIVES = [t.value for t in T if t.value not in [T.List, T.Arrow]]
-
-class Type():
-    t: T
-    params: list["Type"] = []
-
-    def __init__(self, t: T, params: Optional[list[Any]] = None):
-        self.t = t
-        if params is not None:
-            self.params = params
-
-    def __repr__(self):
-        match self.t:
-            case T.Int:
-                return "Int"
-            case T.Float:
-                return "Float"
-            case T.Char:
-                return "Char"
-            case T.Bool:
-                return "Bool"
-            case T.List:
-                return f"{str(self.params[0])} List"
-            case T.Arrow:
-                return " -> ".join(map(str, self.params))
 
 @dataclass(eq=True, frozen=True)
 class TVar(Type):
@@ -155,6 +120,13 @@ def infer_py_ty(ty, expr=None) -> Type:
     else:
         raise TypeError(f"Type {ty.__name__} isn't supported (yet)")
 
+def infer_from_anno(body: Type, p: str):
+    params_ty = body.__annotations__
+    if p in params_ty and p:
+        return infer_py_ty(params_ty[p])
+    else:
+        return fresh_type_var()
+
 def _infer(expr: UOp, env: Subst, subst: Subst) -> Tuple[Type, Subst]:
     def lookup(varname):
         if varname in env:
@@ -168,8 +140,11 @@ def _infer(expr: UOp, env: Subst, subst: Subst) -> Tuple[Type, Subst]:
             raise NameError(f"Unbound variable {varname}")
     match expr.op:
         case Ops.Val:
-            ty = type(expr.args[0])
-            return (infer_py_ty(ty, expr.args[0]), subst)
+            expr_ = expr.args[0]
+            if isinstance(expr_, UOp):
+                return _infer(expr_, env, subst)
+            else:
+                return (infer_py_ty(type(expr_), expr_), subst)
         case Ops.Var:
             return lookup(expr.args[0])
         case Ops.Closure:
@@ -192,26 +167,17 @@ def _infer(expr: UOp, env: Subst, subst: Subst) -> Tuple[Type, Subst]:
             env = env.copy()
             params_ty = []
             for p in params:
-                tv = fresh_type_var()
-                env[p] = tv
-                params_ty.append(tv)
+                ty = fresh_type_var()
+                env[p] = ty
+                params_ty.append(ty)
             # Infer body with those param types in env
             (body_ty, subst) = _infer(body, env, subst)
             ty = arrow_of_list(params_ty, body_ty)
             return (ty, subst)
         case Ops.External:
             *params, body = expr.args
-            params_ty = body.__annotations__
-            if "return" not in params_ty:
-                params_ty["return"] = fresh_type_var()
-                # raise TypeError(f"Missing type information for: {body.__name__}")
-            if len(fn_parameters(body)) + 1 != len(params_ty):
-                for p in fn_parameters(body):
-                    if p not in params_ty:
-                        params_ty[p] = fresh_type_var()
-                # raise TypeError(f"Missing type information for: {body.__name__}")
-            body_ty = infer_py_ty(params_ty["return"])
-            params_ty = [infer_py_ty(params_ty[p]) for p in params]
+            body_ty = infer_from_anno(body, "return")
+            params_ty = [infer_from_anno(body, p) for p in params]
             ty = arrow_of_list(params_ty, body_ty)
             return (ty, subst)
         case Ops.Appl:
