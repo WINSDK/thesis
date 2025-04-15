@@ -28,6 +28,7 @@ In functional languages based on lambda calculus, all functions take exactly one
 
 * [Drawing lambda terms.](https://cs.gmu.edu/~marks/463/slides/1.lambda_calculus/drawingtrees.html)
 * [Fun example of an interactive calculus.](https://treecalcul.us)
+* [Deepseek inference.](https://github.com/deepseek-ai/open-infra-index/blob/main/202502OpenSourceWeek/day_6_one_more_thing_deepseekV3R1_inference_system_overview.md)
 
 ## Eta reduction
 
@@ -81,6 +82,7 @@ Read that weak-head normal form is the most commonly used in real-world compiler
 * Qwen2.5-14B-Instruct-bnb-4bit base seems like the SOTA in our case.
 * https://huggingface.co/agentica-org/DeepCoder-14B-Preview
 * Real SOTA might be R1 Qwen distilled but that requires CoT.
+* TRY CHAIN OF THOUGHT MODEL.
 * Generate hundred's of thousands of synthetic examples  
 * What the hell, generate outwards the redex's?
 * Neurosymbolic?
@@ -88,6 +90,8 @@ Read that weak-head normal form is the most commonly used in real-world compiler
 
 * Teach model what functions it has
 * Make it generate new functions during training and use those too
+
+* Add an index for the `readme.md` with a description of all the *.py files.
 
 ### What even is program synthesis
 
@@ -129,6 +133,11 @@ for finetuning.
 ### Tokenizer
 
 * Micro optimization: Capitalizing identifiers might help as these are more common 
+
+### How do we even get this synthetic data?
+
+Top-Down Synthesis for Library Learning (https://arxiv.org/abs/2211.16605):
+*
 
 #### Augmentation
 
@@ -232,7 +241,7 @@ Model B (S2):
 ```
 <prompt>
   <context>
-  λx. reverse(sort(x))
+  λx. reverse(sort(x)) :: List A -> List A
   <context/>
   You are a lambda calculus wizard, living in the world of lambdas.
   We have an incomplete expression with a missing the defintion of `sort`.
@@ -250,7 +259,7 @@ Model B (S3):
 ```
 <prompt>
   <context>
-  λl. (isNil l) l (insert (head l) (sort (tail l)))
+  λl. (isNil l) l (insert (head l) (sort (tail l))) :: List A -> List A
   <context/>
   You are a lambda calculus wizard, living in the world of lambdas.
   We have an incomplete expression with a missing the defintion of `insert`.
