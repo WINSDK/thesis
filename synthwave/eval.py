@@ -81,6 +81,8 @@ def evaluate(expr: UOp, env: Optional[Dict[str, UOp]]=None):
                 raise ExternalError(f"Overapplication: {result} is not callable.")
             return func
 
+# TODO: sub back fun
+
 def external_fn(f: Callable):
     params = fn_parameters(f)
     return UOp(Ops.External, [*params, f])
@@ -202,9 +204,10 @@ def builtin_reverse(xs):
 def builtin_sort(xs):
     return sorted(xs)
 
-### String manipulation primitives
+def builtin_flatten(xss):
+    return [x for xs in xss for x in xs]
 
-String = list[str]
+### String manipulation primitives
 
 def split(s):
     return list(s)
@@ -228,11 +231,11 @@ def builtin_join(lst, sep):
 
 ### Conversion primitives
 
-def builtin_to_str(x):
-    return split(str(x))
-
-def builtin_to_int(s):
+def builtin_read(s):
     return int(join(s))
+
+def builtin_show(x):
+    return split(str(x))
 
 ### Utility/functional primitives
 
@@ -241,20 +244,24 @@ def builtin_print(x):
     return x
 
 id_expr = define("λx. x")
-
-def builtin_compose(f, g):
-    return lambda x: f(g(x))
+compose_expr = define("λf. λg. λx. f (g x)")
 
 BUILTINS = {
     "True": true_expr,
     "False": false_expr,
     # arithmetic
     "add": external_fn(builtin_add),
+    "+"  : external_fn(builtin_add),
     "mul": external_fn(builtin_mul),
+    "*"  : external_fn(builtin_mul),
     "sub": external_fn(builtin_sub),
+    "-"  : external_fn(builtin_sub),
     "div": external_fn(builtin_div),
+    "/"  : external_fn(builtin_div),
     "mod": external_fn(builtin_mod),
+    "%"  : external_fn(builtin_mod),
     "pow": external_fn(builtin_pow),
+    "**" : external_fn(builtin_pow),
     # Comparisons
     "if": if_expr,
     "eq": external_fn(builtin_eq),
@@ -283,28 +290,35 @@ BUILTINS = {
     "append": external_fn(builtin_append),
     "reverse": external_fn(builtin_reverse),
     "sort": external_fn(builtin_sort),
+    "flatten": external_fn(builtin_flatten),
     # String manipulation
     "concat": external_fn(builtin_str_concat),
     "substr": external_fn(builtin_substring),
     "split": external_fn(builtin_split),
     "join": external_fn(builtin_join),
     # Conversion
-    "to_str": external_fn(builtin_to_str),
-    "to_int": external_fn(builtin_to_int),
+    "show": external_fn(builtin_show),
+    "read": external_fn(builtin_read),
     # Utility/functional
     "print": external_fn(builtin_print),
     "id": id_expr,
-    "compose": external_fn(builtin_compose),
+    "compose": compose_expr,
 }
 
 BUILTIN_SCHEMES = {
     # Arithmetic primitives
     "add":     poly_type("T -> T -> T"),
+    "+":       poly_type("T -> T -> T"),
     "mul":     poly_type("T -> T -> T"),
+    "*":       poly_type("T -> T -> T"),
     "sub":     poly_type("T -> T -> T"),
+    "-":       poly_type("T -> T -> T"),
     "div":     poly_type("T -> T -> T"),
+    "/":       poly_type("T -> T -> T"),
     "mod":     poly_type("T -> T -> T"),
+    "%":       poly_type("T -> T -> T"),
     "pow":     poly_type("T -> T -> T"),
+    "**":      poly_type("T -> T -> T"),
     # Comparisons
     "if":      poly_type("T -> A -> B"),
     "eq":      poly_type("T -> T -> Bool"),
@@ -335,14 +349,15 @@ BUILTIN_SCHEMES = {
     "append":  poly_type("List T -> T -> List T"),
     "reverse": poly_type("List T -> List T"),
     "sort":    poly_type("List T -> List T"),
+    "flatten": poly_type("List List T -> List T"),
     # String manipulation
     "concat":  poly_type("String -> String -> String"),
     "substr":  poly_type("String -> Int -> Int -> String"),
     "split":   poly_type("String -> String -> List String"),
     "join":    poly_type("List String -> String -> String"),
     # Conversion
-    "to_str":  poly_type("T -> String"),
-    "to_int":  poly_type("String -> Int"),
+    "show":    poly_type("T -> String"),
+    "read":    poly_type("String -> Int"),
     # Utility/functional
     "print":   poly_type("T -> T"),
     "id":      poly_type("A -> A"),

@@ -5,20 +5,20 @@ from .dsl import Type, UOp, Ops, TVar, T
 LITERALS = ("FLOAT", "INT", "BOOL", "CHAR", "STRING")
 ATOMS = (*LITERALS, "IDENT", "LPAREN", "LBRACKET", "LAMBDA")
 TOKEN_REGEX = r"""
-(?P<LAMBDA>lambda|L|λ)              # 'lambda' or 'L' or 'λ'
-|(?P<FLOAT>-?(?:\d+\.\d*|\d*\.\d+)) # float literal (e.g. 123.456, -0.5)
-|(?P<INT>-?\d+)                     # integer literal
-|(?P<BOOL>True|False)               # bool literal
-|(?P<CHAR>'(?:\\.|[^\\'])')         # char literal (e.g. 'a', '\n')
-|(?P<STRING>"(?:\\.|[^\\"])*")      # string literal (e.g. "hello", "line\nbreak")
-|(?P<IDENT>[a-zA-Z_]\w*)            # identifier (variable names, etc.)
-|(?P<LPAREN>\()                     # (
-|(?P<RPAREN>\))                     # )
-|(?P<LBRACKET>\[)                   # [
-|(?P<RBRACKET>\])                   # ]
-|(?P<COMMA>,)                       # ,
-|(?P<DOT>\.)                        # .
-|(?P<WHITESPACE>\s+)                # whitespace (ignored)
+(?P<LAMBDA>lambda|L|λ)                 # 'lambda' or 'L' or 'λ'
+|(?P<FLOAT>-?(?:\d+\.\d*|\d*\.\d+))    # float literal (e.g. 123.456, -0.5)
+|(?P<INT>-?\d+)                        # integer literal
+|(?P<BOOL>True|False)                  # bool literal
+|(?P<CHAR>'(?:\\.|[^\\'])')            # char literal (e.g. 'a', '\n')
+|(?P<STRING>"(?:\\.|[^\\"])*")         # string literal (e.g. "hello", "line\nbreak")
+|(?P<IDENT>[a-zA-Z_+\-*\/=%><!&|^~]+)  # identifier including operators like +, -, *, etc.
+|(?P<LPAREN>\()                        # (
+|(?P<RPAREN>\))                        # )
+|(?P<LBRACKET>\[)                      # [
+|(?P<RBRACKET>\])                      # ]
+|(?P<COMMA>,)                          # ,
+|(?P<DOT>\.)                           # .
+|(?P<WHITESPACE>\s+)                   # whitespace (ignored)
 """
 
 @dataclass
