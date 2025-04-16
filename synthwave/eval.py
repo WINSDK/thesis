@@ -5,39 +5,38 @@ from .dsl import Scheme, UOp, Ops, TVar, ExternalError
 from .helpers import fn_parameters
 from .parser import parse, parse_poly_type
 
-def eval_maybe_py(expr):
+def eval_maybe_py(expr, env):
     # Specialized to lists and singular values
     if isinstance(expr, UOp):
-        return evaluate(expr)
+        return _evaluate(expr, env)
     elif isinstance(expr, list):
-        return [eval_maybe_py(x) for x in expr]
+        return [eval_maybe_py(x, env) for x in expr]
     return expr
 
-def evaluate(expr: UOp, env: Optional[Dict[str, UOp]]=None):
-    if env is None:
-        env = {}
-    def lookup(varname):
-        if varname in env:
-            var = env[varname]
-        elif varname in BUILTINS:
-            var = BUILTINS[varname]
-        else:
-            raise NameError(f"Unbound variable: {varname}")
-        return var
+def lookup(varname, env):
+    if varname in env:
+        var = env[varname]
+    elif varname in BUILTINS:
+        var = BUILTINS[varname]
+    else:
+        raise NameError(f"Unbound variable: {varname}")
+    return var
+
+def _evaluate(expr: UOp, env: Dict[str, UOp]):
     match expr.op:
         case Ops.Val:
-            return eval_maybe_py(expr.args[0])
+            return eval_maybe_py(expr.args[0], env)
         case Ops.Var:
-            expr = lookup(expr.args[0])
-            return eval_maybe_py(expr)
+            expr = lookup(expr.args[0], env)
+            return eval_maybe_py(expr, env)
         case Ops.Closure:
             return expr
         case Ops.Abstr | Ops.External:
             return UOp(Ops.Closure, [*expr.args, env])
         case Ops.Appl:
             func, *args = expr.args
-            func = evaluate(func, env) # Closure around either an abstr or external
-            args = [evaluate(a, env) for a in args]
+            func = _evaluate(func, env) # Closure around either an abstr or external
+            args = [_evaluate(a, env) for a in args]
             while args:
                 if not (isinstance(func, UOp) and func.op == Ops.Closure):
                     raise TypeError(f"Cannot call a non-closure: {func}")
@@ -55,12 +54,12 @@ def evaluate(expr: UOp, env: Optional[Dict[str, UOp]]=None):
                 # Full application or over-applied
                 closure_env = apply(closure_env, params, args[:len(params)])
                 if isinstance(body, UOp):
-                    func = evaluate(body, closure_env)
+                    func = _evaluate(body, closure_env)
                     args = args[len(params):]
                     continue
                 # Applying python function
                 params = fn_parameters(body)
-                pv = {p: eval_maybe_py(closure_env[p]) for p in params}
+                pv = {p: eval_maybe_py(closure_env[p], env) for p in params}
                 try:
                     result = body(**pv)
                 except Exception as e:
@@ -81,6 +80,19 @@ def evaluate(expr: UOp, env: Optional[Dict[str, UOp]]=None):
                 raise ExternalError(f"Overapplication: {result} is not callable.")
             return func
 
+def evaluate(expr: UOp, env: Optional[Dict[str, UOp]]=None):
+    if env is None:
+        env = {}
+    # Don't eval variables that hold abstr's and externals
+    if expr.op == Ops.Var:
+        inner_expr = lookup(expr.args[0], env)
+        if inner_expr.op == Ops.Abstr or inner_expr.op == Ops.External:
+            return expr
+    if expr.op == Ops.Abstr or expr.op == Ops.External:
+        # Don't evaluate abstr's or externals without application
+        return expr
+    return _evaluate(expr, env)
+
 # TODO: sub back fun
 
 def external_fn(f: Callable):
@@ -92,14 +104,6 @@ def poly_type(s: str) -> Scheme:
     ty = parse_poly_type(s)
     vars = [TVar(tv.name, generic=True) for tv in ty.free_vars()]
     return Scheme(vars, ty)
-
-def define(s: str) -> UOp:
-    # Can't just `parse` sometimes. Some expressions require being evaluated
-    # into closures: these can be abstractions or externals.
-    expr = evaluate(parse(s))
-    if not isinstance(expr, UOp):
-        expr = UOp(Ops.Val, [expr])
-    return expr
 
 ### Arithmetic primitives
 
@@ -126,7 +130,7 @@ def builtin_pow(x, y):
 true_expr = parse("λt f. t")
 false_expr = parse("λt f. f")
 
-if_expr = define("λc t e. c t e")
+if_expr = parse("λc t e. c t e")
 
 def church_bool(cond):
     return true_expr if cond else false_expr
@@ -154,15 +158,15 @@ def builtin_leq(x, y):
 
 ### Boolean/logical operators
 
-not_expr = define("λp. p False True")
-and_expr = define("λp q. p q False")
-or_expr = define("λp q. p True q")
-xor_expr = define("λa b. a (not b) b")
+not_expr = parse("λp. p False True")
+and_expr = parse("λp q. p q False")
+or_expr = parse("λp q. p True q")
+xor_expr = parse("λa b. a (not b) b")
 
 ### List and collection utilities
 
-nil_expr = define("[]")
-is_nil_expr = define("λxs. eq xs nil")
+nil_expr = parse("[]")
+is_nil_expr = parse("λxs. eq xs nil")
 
 def builtin_lfold(xs, acc, f):
     for elem in xs:
@@ -174,8 +178,8 @@ def builtin_rfold(xs, f, acc):
         acc = f(elem, acc)
     return acc
 
-map_expr = define("λxs f. rfold xs (λx acc. cons (f x) acc) nil")
-filter_expr = define("λxs f. lfold xs nil (λacc x. (f x) (cons x acc) acc)")
+map_expr = parse("λxs f. rfold xs (λx acc. cons (f x) acc) nil")
+filter_expr = parse("λxs f. lfold xs nil (λacc x. (f x) (cons x acc) acc)")
 
 def builtin_zip(xs1, xs2):
     return list(map(list, zip(xs1, xs2)))
@@ -243,8 +247,8 @@ def builtin_print(x):
     print(x)
     return x
 
-id_expr = define("λx. x")
-compose_expr = define("λf. λg. λx. f (g x)")
+id_expr = parse("λx. x")
+compose_expr = parse("λf. λg. λx. f (g x)")
 
 BUILTINS = {
     "True": true_expr,

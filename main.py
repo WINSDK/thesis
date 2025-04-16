@@ -161,21 +161,15 @@ def train_model():
 
 def main():
     if ARGS.repl:
-        from synthwave import parse, evaluate, infer
+        from synthwave import parse, evaluate, infer, pretty_print
         while True:
             s = input("> ").strip()
             if len(s) == 0:
                 continue
             try:
-                expr = parse(s)
-                print(f"  => {expr}")
-                result = evaluate(expr)
+                result = evaluate(parse(s))
                 result_ty = infer(result)
-                # Pretty print Char List
-                if isinstance(result, list) and len(result) > 0:
-                    if isinstance(result[0], str):
-                        result = '"' + "".join(result) + '"'
-                print(f"    => {result} :: {result_ty}")
+                print(f"  => {pretty_print(result)} :: {result_ty}")
             except Exception as e:
                 print(f"\033[91m{repr(e)}\033[0m")
     else:

@@ -112,7 +112,6 @@ def _infer(expr: UOp, env: Env, subst: Subst) -> Tuple[Type, Subst]:
             # Instantiate the scheme to get a fresh copy of the type.
             return (instantiate(env[varname]), subst)
         else:
-            print(env)
             raise NameError(f"Unbound variable {varname}")
     match expr.op:
         case Ops.Val:

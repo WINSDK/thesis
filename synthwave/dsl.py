@@ -38,7 +38,7 @@ class UOp:
     def __call__(self, *args):
         from .eval import evaluate
         match self.op:
-            case Ops.Closure:
+            case Ops.Closure | Ops.Abstr | Ops.External:
                 cargs = []
                 for a in args:
                     # We need to wrap literals in a Ops.Val but

@@ -1,7 +1,13 @@
 import pytest
 from synthwave.typing import infer
 from synthwave.dsl import UOp, Ops
-from synthwave.eval import evaluate, define
+from synthwave.eval import evaluate, parse
+
+def define(s: str) -> UOp:
+    expr = evaluate(parse(s))
+    if not isinstance(expr, UOp):
+        expr = UOp(Ops.Val, [expr])
+    return expr
 
 
 def val(x):
@@ -39,14 +45,8 @@ def test_abstr_single():
         "x",
         UOp(Ops.Appl, [var("add"), var("x"), val(1)])
     ])
-    # Evaluate to a closure
-    closure = evaluate(expr)
-    assert isinstance(closure, UOp)
-    assert closure.op == Ops.Closure
-    assert closure.args[0] == "x"            # param 1
-    assert closure.args[1] == expr.args[1]   # body
-    assert closure.args[2] == {}             # captured env
-
+    abstr = evaluate(expr)
+    assert str(abstr) == "Abstr(x, Appl(add, x, 1))"
 
 def test_appl_single():
     # (λx. x + 1) 41 => 42
@@ -64,11 +64,8 @@ def test_abstr_multi():
         "x", "y",
         UOp(Ops.Appl, [var("add"), var("x"), var("y")])
     ])
-    closure = evaluate(expr)
-    assert isinstance(closure, UOp)
-    assert closure.op == Ops.Closure
-    assert closure.args[0] == "x"
-    assert closure.args[1] == "y"
+    abstr = evaluate(expr)
+    assert str(abstr) == "Abstr(x, y, Appl(add, x, y))"
 
 
 def test_appl_multi():
@@ -82,26 +79,7 @@ def test_appl_multi():
 
 
 def test_nested():
-    outer = UOp(
-        Ops.Abstr,
-        [
-            "x",
-            "y",
-            UOp(
-                Ops.Appl,
-                [
-                    UOp( # λz. x + z
-                        Ops.Abstr,
-                        ["z", UOp(Ops.Appl, [var("add"), var("x"), var("z")])]
-                    ),
-                    UOp( # y * 2 => (mul y 2)
-                        Ops.Appl,
-                        [var("mul"), var("y"), val(2)]
-                    ),
-                ],
-            ),
-        ],
-    )
+    outer = parse("λx y. (λz.+ x z) (mul y 2)")
     # Apply outer to 5, 10
     expr = UOp(Ops.Appl, [outer, val(5), val(10)])
     assert evaluate(expr) == 25
