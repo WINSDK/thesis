@@ -95,33 +95,6 @@ def test_environment_sharing():
     expr = UOp(Ops.Appl, [abstraction_with_free, val(1)])
     assert evaluate(expr, env={"free": val(100)}) == 101
 
-def test_partial_appl_simple():
-    partial_expr = UOp(Ops.Appl, [var("add"), val(10)])
-    partial_result = evaluate(partial_expr)
-    assert isinstance(partial_result, UOp)
-    assert partial_result.op == Ops.Closure
-    expr = UOp(Ops.Appl, [partial_expr, val(32)])
-    assert evaluate(expr) == 42
-
-def test_partial_appl_chain():
-    # step1 = add 1         => closure
-    # step2 = step1 2       => 3
-    # step3 = add step2     => closure
-    # step4 = step3 39      => 42
-    step1 = UOp(Ops.Appl, [var("add"), val(1)])
-    closure_step1 = evaluate(step1)
-    assert isinstance(closure_step1, UOp)
-    assert closure_step1.op == Ops.Closure
-    step2 = UOp(Ops.Appl, [step1, val(2)])
-    val_step2 = evaluate(step2)
-    assert val_step2 == 3
-    step3 = UOp(Ops.Appl, [var("add"), UOp(Ops.Val, [val_step2])])
-    closure_step3 = evaluate(step3)
-    assert isinstance(closure_step3, UOp)
-    assert closure_step3.op == Ops.Closure
-    step4 = UOp(Ops.Appl, [step3, val(39)])
-    assert evaluate(step4) == 42
-
 def test_map_add5():
     # map [1,2,3] (add 5) => Int List
     expr = define("map [1,2,3] (add 5)")

@@ -1,6 +1,7 @@
 from dataclasses import dataclass
+from functools import cache
 import re
-from .dsl import Type, UOp, Ops, TVar, T
+from .dsl import Type, UOp, Ops, TVar, T, reduce_redundant
 
 LITERALS = ("FLOAT", "INT", "BOOL", "CHAR", "STRING")
 ATOMS = (*LITERALS, "IDENT", "LPAREN", "LBRACKET", "LAMBDA")
@@ -160,23 +161,18 @@ class Parser():
         else:
             return self.parse_appl()
 
-def reduce_redundant(expr):
-    """Removes redundant bracket's in nested applications"""
-    if not isinstance(expr, UOp):
-        return expr
-    if expr.op == Ops.Appl and len(expr.args) == 1:
-        return reduce_redundant(expr.args[0])
-    return UOp(expr.op, [reduce_redundant(a) for a in expr.args])
-
+@cache
 def parse(src: str) -> UOp:
     p = Parser(tokens=tokenize(src))
     expr = p.parse_expr()
     if p.next() is not None:
         raise SyntaxError()
-    return reduce_redundant(expr)
+    expr = reduce_redundant(expr)
+    return expr
 
 POLY_TYPE_REGEX = re.compile(r"\(|\)|->|[A-Za-z]+")
 
+@cache
 def parse_poly_type(s: str) -> Type:
     tokens = POLY_TYPE_REGEX.findall(s)
     tv_cache = {}  # cache for generic TVar"s

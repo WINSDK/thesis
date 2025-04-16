@@ -100,24 +100,21 @@ def infer_py_ty(expr, env: Env, subst: Subst) -> Tuple[Type, Subst]:
         raise TypeError(f"Type {type(expr).__name__} isn't supported (yet)")
     return py_ty, subst
 
-def infer_maybe_py(expr, env: Env, subst: Subst) -> Tuple[Type, Subst]:
-    if isinstance(expr, UOp):
-        return _infer(expr, env, subst)
+def lookup(varname: str, env: Env, subst: Subst) -> Tuple[Type, Subst]:
+    if varname in env:
+        # Instantiate the scheme to get a fresh copy of the type.
+        return (instantiate(env[varname]), subst)
     else:
-        return infer_py_ty(expr, env, subst)
+        raise NameError(f"Unbound variable {varname}")
 
-def _infer(expr: UOp, env: Env, subst: Subst) -> Tuple[Type, Subst]:
-    def lookup(varname: str) -> Tuple[Type, Subst]:
-        if varname in env:
-            # Instantiate the scheme to get a fresh copy of the type.
-            return (instantiate(env[varname]), subst)
-        else:
-            raise NameError(f"Unbound variable {varname}")
+def _infer(expr, env: Env, subst: Subst) -> Tuple[Type, Subst]:
+    if not isinstance(expr, UOp):
+        return infer_py_ty(expr, env, subst)
     match expr.op:
         case Ops.Val:
-            return infer_maybe_py(expr.args[0], env, subst)
+            return _infer(expr.args[0], env, subst)
         case Ops.Var:
-            return lookup(expr.args[0])
+            return lookup(expr.args[0], env, subst)
         case Ops.Closure:
             *args, body, closure = expr.args
             # Merge captured environment into the type-inference environment.
@@ -133,35 +130,35 @@ def _infer(expr: UOp, env: Env, subst: Subst) -> Tuple[Type, Subst]:
                 body = UOp(Ops.External, [*args, body])
                 return _infer(body, env, subst)
         case Ops.Abstr:
-            *params, body = expr.args
+            *args, body = expr.args
             new_env = env.copy()
-            params_ty = []
-            for p in params:
+            args_ty = []
+            for a in args:
                 tv = fresh_type_var()
-                # When a parameter is introduced, it is monomorphic until it is generalized.
-                new_env[p] = Scheme([], tv)
-                params_ty.append(tv)
+                # When a arg is introduced, it is monomorphic until it is generalized.
+                new_env[a] = Scheme([], tv)
+                args_ty.append(tv)
             body_ty, subst = _infer(body, new_env, subst)
-            ty = Type.arrow(params_ty, body_ty)
+            ty = Type.arrow(args_ty, body_ty)
             return (ty, subst)
         case Ops.External:
-            *params, body = expr.args
+            body = expr.args[-1]
             # I don't like requiring builtin's to be defined python fn's
             fn_name = body.__name__.removeprefix("builtin_")
-            return lookup(fn_name)
+            return lookup(fn_name, env, subst)
         case Ops.Appl:
             func, *args = expr.args
             func_ty, subst = _infer(func, env, subst)
-            for arg in args:
+            for a in args:
                 # For each argument, the function type must be an arrow.
                 param_ty = fresh_type_var()
                 result_ty = fresh_type_var()
                 subst = unify(func_ty, Type(T.Arrow, [param_ty, result_ty]), subst)
-                arg_ty, subst = _infer(arg, env, subst)
+                arg_ty, subst = _infer(a, env, subst)
                 subst = unify(arg_ty, param_ty, subst)
                 func_ty = result_ty
             return (func_ty, subst)
 
 def infer(expr) -> Type:
-    ty, subst = infer_maybe_py(expr, BUILTIN_SCHEMES, {})
+    ty, subst = _infer(expr, BUILTIN_SCHEMES, {})
     return apply_subst(ty, subst)

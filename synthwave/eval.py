@@ -1,7 +1,6 @@
 from collections.abc import Callable
-from functools import cache
 from typing import Dict, Optional
-from .dsl import Scheme, UOp, Ops, TVar, ExternalError
+from .dsl import Scheme, UOp, Ops, TVar, ExternalError, reduce_redundant
 from .helpers import fn_parameters
 from .parser import parse, parse_poly_type
 
@@ -68,10 +67,10 @@ def _evaluate(expr: UOp, env: Dict[str, UOp]):
                 args = args[len(params):]
                 # It's a full application
                 if not args:
-                    return result
+                    return eval_maybe_py(result, env)
                 # The builtin returned a new closure
                 if isinstance(result, UOp) and result.op == Ops.Closure:
-                    func = result
+                    func = eval_maybe_py(result, env)
                     continue
                 # The builtin returned another builtin
                 if callable(result):
@@ -79,6 +78,57 @@ def _evaluate(expr: UOp, env: Dict[str, UOp]):
                     continue
                 raise ExternalError(f"Overapplication: {result} is not callable.")
             return func
+
+def substitute(expr, var: str, new_expr):
+    if not isinstance(expr, UOp):
+        return expr
+    if expr.op == Ops.Var and expr.args[0] == var:
+        return new_expr
+    elif expr.op == Ops.Appl:
+        body, *args = expr.args
+        args = [substitute(e, var, new_expr) for e in args]
+        return UOp(Ops.Appl, [body, *args])
+    elif expr.op == Ops.Abstr:
+        *params, body = expr.args
+        # If the bound variable is the same as the substitution variable,
+        # we leave it alone (or rename it to avoid capture).
+        if not any(p == var for p in params):
+            body = substitute(body, var, new_expr)
+        return UOp(Ops.Abstr, [*params, body])
+    else:
+        return expr
+
+def reify(expr):
+    if not isinstance(expr, UOp):
+        return expr
+    if expr.op == Ops.Closure:
+        *args, body, env = expr.args
+        if not isinstance(body, UOp) and callable(body):
+            params = fn_parameters(body)
+            fn_name = body.__name__.removeprefix("builtin_")
+            body = UOp(Ops.Var, [fn_name])
+            val_args = [UOp(Ops.Val, [env[p]]) for p in params if p in env]
+            inner_args = [UOp(Ops.Var, [a]) for a in args]
+            inner = UOp(Ops.Appl, [body, *val_args, *inner_args])
+            return UOp(Ops.Abstr, [*args, inner])
+        # Reconstruct an abstraction
+        for var, val in env.items():
+            # Function that replaces free occurrences of `var` in `body` with the reified form.
+            body = substitute(body, var, reify(val))
+        return UOp(Ops.Abstr, [*args, reify(body)])
+    elif expr.op == Ops.Appl:
+        return UOp(Ops.Appl, [reify(e) for e in expr.args])
+    elif expr.op == Ops.Abstr:
+        *params, body = expr.args
+        return UOp(Ops.Abstr, [*params, reify(body)])
+    else:
+        return expr
+
+def back_substitution(expr: UOp, env: Dict[str, UOp]) -> UOp:
+    for var, kexpr in (env | BUILTINS).items():
+        if expr == kexpr:
+            return UOp(Ops.Var, [var])
+    return expr
 
 def evaluate(expr: UOp, env: Optional[Dict[str, UOp]]=None):
     if env is None:
@@ -91,15 +141,16 @@ def evaluate(expr: UOp, env: Optional[Dict[str, UOp]]=None):
     if expr.op == Ops.Abstr or expr.op == Ops.External:
         # Don't evaluate abstr's or externals without application
         return expr
-    return _evaluate(expr, env)
-
-# TODO: sub back fun
+    expr = _evaluate(expr, env)
+    expr = reify(expr)
+    expr = reduce_redundant(expr)
+    expr = back_substitution(expr, env)
+    return expr
 
 def external_fn(f: Callable):
     params = fn_parameters(f)
     return UOp(Ops.External, [*params, f])
 
-@cache
 def poly_type(s: str) -> Scheme:
     ty = parse_poly_type(s)
     vars = [TVar(tv.name, generic=True) for tv in ty.free_vars()]
@@ -136,7 +187,6 @@ def church_bool(cond):
     return true_expr if cond else false_expr
 
 def builtin_eq(x, y):
-    # (Note: adjust as needed if UOp equality should be handled differently.)
     if isinstance(x, UOp) and isinstance(y, UOp):
         return and_expr(x, y)
     return church_bool(x == y)
@@ -179,7 +229,7 @@ def builtin_rfold(xs, f, acc):
     return acc
 
 map_expr = parse("λxs f. rfold xs (λx acc. cons (f x) acc) nil")
-filter_expr = parse("λxs f. lfold xs nil (λacc x. (f x) (cons x acc) acc)")
+filter_expr = parse("λxs p. rfold xs (λx acc. (p x) (cons x acc) acc) nil")
 
 def builtin_zip(xs1, xs2):
     return list(map(list, zip(xs1, xs2)))

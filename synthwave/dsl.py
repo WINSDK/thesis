@@ -19,7 +19,7 @@ class Ops(IntEnum):
     # Context-specific functions: [arg1, arg2, .., body, env]
     Closure = auto()
 
-@dataclass(eq=False, slots=True)
+@dataclass(eq=True, frozen=True, slots=True)
 class UOp:
     op: Ops
     args: list[Any]
@@ -49,6 +49,15 @@ class UOp:
                 return evaluate(self)(*args)
             case _:
                 raise ExternalError(f"Can't call uop: {self}")
+
+
+def reduce_redundant(expr):
+    """Removes redundant bracket's in nested applications"""
+    if not isinstance(expr, UOp):
+        return expr
+    if expr.op == Ops.Appl and len(expr.args) == 1:
+        return reduce_redundant(expr.args[0])
+    return UOp(expr.op, [reduce_redundant(a) for a in expr.args])
 
 class T(IntEnum):
     Int = auto()
