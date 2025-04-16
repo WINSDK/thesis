@@ -23,7 +23,7 @@ TOKEN_REGEX = r"""
 """
 
 @dataclass
-class Token():
+class Token:
     kind: str
     val: str
 
@@ -38,9 +38,11 @@ def tokenize(src: str) -> list[Token]:
         tokens.append(Token(kind, text))
     return tokens
 
+# Context sensitive parse of lambda expressions
 @dataclass
-class Parser():
+class Parser:
     tokens: list[Token]
+    env: set[str]
     off: int = 0
 
     def peek(self):
@@ -112,6 +114,9 @@ class Parser():
                 return self.parse_primitive(t)
             case "IDENT":
                 self.next()
+                # Check that ident is bound in the current context
+                if t.val not in self.env:
+                    raise SyntaxError(f"Unbound variable: {t.val}")
                 return UOp(Ops.Var, [t.val])
             case "LPAREN":
                 self.next()
@@ -140,7 +145,12 @@ class Parser():
         self.expect("DOT", "Expected '.' after lambda parameter")
         if len(params) == 0:
             raise SyntaxError("Abstractions must have at least one argument")
+        # Save the current env
+        old_env = self.env.copy()
+        self.env.update(params)
         body = self.parse_expr()
+        # Restore the previous env
+        self.env = old_env
         return UOp(Ops.Abstr, [*params, body])
 
     def parse_appl(self) -> UOp:
@@ -161,9 +171,10 @@ class Parser():
         else:
             return self.parse_appl()
 
-@cache
-def parse(src: str) -> UOp:
-    p = Parser(tokens=tokenize(src))
+def parse(src: str, **kwargs) -> UOp:
+    env = kwargs.get("known", set()).copy()
+    assert isinstance(env, set), "parse(..) paramter known is not a set"
+    p = Parser(tokenize(src), env)
     expr = p.parse_expr()
     if p.next() is not None:
         raise SyntaxError()

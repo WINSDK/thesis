@@ -80,6 +80,8 @@ def _evaluate(expr: UOp, env: Dict[str, UOp]):
             return func
 
 def substitute(expr, var: str, new_expr):
+    if isinstance(expr, list):
+        return [substitute(e, var, new_expr) for e in expr]
     if not isinstance(expr, UOp):
         return expr
     if expr.op == Ops.Var and expr.args[0] == var:
@@ -99,6 +101,8 @@ def substitute(expr, var: str, new_expr):
         return expr
 
 def reify(expr):
+    if isinstance(expr, list):
+        return [reify(e) for e in expr]
     if not isinstance(expr, UOp):
         return expr
     if expr.op == Ops.Closure:
@@ -124,11 +128,19 @@ def reify(expr):
     else:
         return expr
 
-def back_substitution(expr: UOp, env: Dict[str, UOp]) -> UOp:
-    for var, kexpr in (env | BUILTINS).items():
-        if expr == kexpr:
-            return UOp(Ops.Var, [var])
-    return expr
+def back_substitution(expr, env: Dict[str, UOp]):
+    env = env | BUILTINS
+    def aux(expr):
+        if isinstance(expr, list):
+            return [aux(e) for e in expr]
+        if not isinstance(expr, UOp):
+            return expr
+        expr = UOp(expr.op, [aux(a) for a in expr.args])
+        for var, kexpr in env.items():
+            if expr == kexpr:
+                return UOp(Ops.Var, [var])
+        return expr
+    return aux(expr)
 
 def evaluate(expr: UOp, env: Optional[Dict[str, UOp]]=None):
     if env is None:
@@ -141,11 +153,11 @@ def evaluate(expr: UOp, env: Optional[Dict[str, UOp]]=None):
     if expr.op == Ops.Abstr or expr.op == Ops.External:
         # Don't evaluate abstr's or externals without application
         return expr
-    expr = _evaluate(expr, env)
-    expr = reify(expr)
-    expr = reduce_redundant(expr)
-    expr = back_substitution(expr, env)
-    return expr
+    rexpr = _evaluate(expr, env)
+    rexpr = reify(rexpr)
+    rexpr = reduce_redundant(rexpr)
+    rexpr = back_substitution(rexpr, env)
+    return rexpr
 
 def external_fn(f: Callable):
     params = fn_parameters(f)
@@ -208,15 +220,15 @@ def builtin_leq(x, y):
 
 ### Boolean/logical operators
 
-not_expr = parse("λp. p False True")
-and_expr = parse("λp q. p q False")
-or_expr = parse("λp q. p True q")
-xor_expr = parse("λa b. a (not b) b")
+not_expr = parse("λp. p False True", known={"False", "True"})
+and_expr = parse("λp q. p q False", known={"False"})
+or_expr = parse("λp q. p True q", known={"True"})
+xor_expr = parse("λa b. a (not b) b", known={"not"})
 
 ### List and collection utilities
 
 nil_expr = parse("[]")
-is_nil_expr = parse("λxs. eq xs nil")
+is_nil_expr = parse("λxs. eq xs nil", known={"eq", "nil"})
 
 def builtin_lfold(xs, acc, f):
     for elem in xs:
@@ -228,8 +240,14 @@ def builtin_rfold(xs, f, acc):
         acc = f(elem, acc)
     return acc
 
-map_expr = parse("λxs f. rfold xs (λx acc. cons (f x) acc) nil")
-filter_expr = parse("λxs p. rfold xs (λx acc. (p x) (cons x acc) acc) nil")
+map_expr = parse(
+    "λxs f. rfold xs (λx acc. cons (f x) acc) nil",
+    known={"rfold", "cons", "nil"}
+)
+filter_expr = parse(
+    "λxs p. rfold xs (λx acc. (p x) (cons x acc) acc) nil",
+    known={"rfold", "cons", "nil"}
+)
 
 def builtin_zip(xs1, xs2):
     return list(map(list, zip(xs1, xs2)))
@@ -418,8 +436,10 @@ BUILTIN_SCHEMES = {
     "compose": poly_type("(B -> C) -> (A -> B) -> A -> C"),
 }
 
+KNOWN_VARS = set(BUILTINS.keys())
+
 # Safeguard for missing schemes (type checker really doesn't like when that happens)
-for k in BUILTINS.keys():
+for k in KNOWN_VARS:
     if k not in BUILTIN_SCHEMES:
         print(f"{k} missing scheme")
         exit(1)

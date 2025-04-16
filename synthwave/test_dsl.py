@@ -1,7 +1,11 @@
 import pytest
 from synthwave.typing import infer
 from synthwave.dsl import UOp, Ops
-from synthwave.eval import evaluate, parse
+from synthwave.eval import evaluate
+
+def parse(s):
+    from synthwave.eval import parse, KNOWN_VARS
+    return parse(s, known=KNOWN_VARS)
 
 def define(s: str) -> UOp:
     expr = evaluate(parse(s))
@@ -265,3 +269,25 @@ def test_infer_map_add5():
     expr = define("map [1, 2, 3] (add 5)")
     ty = infer(expr)
     assert str(ty) == "Int List"
+
+def test_unbound_variable():
+    # Unbound variable fails
+    with pytest.raises(SyntaxError, match="Unbound variable"):
+        parse("x")
+
+def test_nested_lambda():
+    # Test a nested lambda where inner ref is correctly bound
+    ast = parse("λx.λy.x")
+    assert ast.op == Ops.Abstr
+    assert ast.args[0] == "x"
+    inner_lambda = ast.args[1]
+    assert inner_lambda.op == Ops.Abstr
+    assert inner_lambda.args[0] == "y"
+    inner_body = inner_lambda.args[1]
+    assert inner_body.op == Ops.Var
+    assert inner_body.args[0] == "x"
+
+def test_unbound_in_nested_lambda():
+    # Inner lambda refers to an unbound variable
+    with pytest.raises(SyntaxError, match="Unbound variable"):
+        parse("λx.(λy.z)")
