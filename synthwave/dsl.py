@@ -10,13 +10,13 @@ class Ops(IntEnum):
     Val = auto()
     # Anything that's `named`: functions, parameters, etc
     Var = auto()  
-    # Application (M N): [body, param1, param2, ..]
+    # Application (M N): [body, arg1, arg2, ..]
     Appl = auto()
-    # Abstraction (λx.M): [arg1, arg2, .., body]
+    # Abstraction (λx.M): [param1, param2, .., body]
     Abstr = auto() 
-    # Regular python functions: [arg1, arg2, .., python_fn]
+    # Regular python functions: [param1, param2, .., python_fn]
     External = auto() 
-    # Context-specific functions: [arg1, arg2, .., body, env]
+    # Context-specific functions: [param1, param2, .., body, env]
     Closure = auto()
 
 @dataclass(eq=True, frozen=True, slots=True)

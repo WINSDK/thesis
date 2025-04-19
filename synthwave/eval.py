@@ -1,6 +1,6 @@
 from collections.abc import Callable
 from typing import Dict, Optional
-from .dsl import Scheme, UOp, Ops, TVar, ExternalError, reduce_redundant
+from .dsl import UOp, Ops, ExternalError, reduce_redundant
 from .helpers import fn_parameters
 from .parser import parse, parse_poly_type
 
@@ -162,11 +162,6 @@ def evaluate(expr: UOp, env: Optional[Dict[str, UOp]]=None):
 def external_fn(f: Callable):
     params = fn_parameters(f)
     return UOp(Ops.External, [*params, f])
-
-def poly_type(s: str) -> Scheme:
-    ty = parse_poly_type(s)
-    vars = [TVar(tv.name, generic=True) for tv in ty.free_vars()]
-    return Scheme(vars, ty)
 
 ### Arithmetic primitives
 
@@ -379,61 +374,61 @@ BUILTINS = {
 
 BUILTIN_SCHEMES = {
     # Arithmetic primitives
-    "add":     poly_type("T -> T -> T"),
-    "+":       poly_type("T -> T -> T"),
-    "mul":     poly_type("T -> T -> T"),
-    "*":       poly_type("T -> T -> T"),
-    "sub":     poly_type("T -> T -> T"),
-    "-":       poly_type("T -> T -> T"),
-    "div":     poly_type("T -> T -> T"),
-    "/":       poly_type("T -> T -> T"),
-    "mod":     poly_type("T -> T -> T"),
-    "%":       poly_type("T -> T -> T"),
-    "pow":     poly_type("T -> T -> T"),
-    "**":      poly_type("T -> T -> T"),
+    "add":     parse_poly_type("T -> T -> T"),
+    "+":       parse_poly_type("T -> T -> T"),
+    "mul":     parse_poly_type("T -> T -> T"),
+    "*":       parse_poly_type("T -> T -> T"),
+    "sub":     parse_poly_type("T -> T -> T"),
+    "-":       parse_poly_type("T -> T -> T"),
+    "div":     parse_poly_type("T -> T -> T"),
+    "/":       parse_poly_type("T -> T -> T"),
+    "mod":     parse_poly_type("T -> T -> T"),
+    "%":       parse_poly_type("T -> T -> T"),
+    "pow":     parse_poly_type("T -> T -> T"),
+    "**":      parse_poly_type("T -> T -> T"),
     # Comparisons
-    "if":      poly_type("T -> A -> B"),
-    "eq":      poly_type("T -> T -> Bool"),
-    "neq":     poly_type("T -> T -> Bool"),
-    "gt":      poly_type("T -> T -> Bool"),
-    "lt":      poly_type("T -> T -> Bool"),
-    "geq":     poly_type("T -> T -> Bool"),
-    "leq":     poly_type("T -> T -> Bool"),
+    "if":      parse_poly_type("T -> A -> B"),
+    "eq":      parse_poly_type("T -> T -> Bool"),
+    "neq":     parse_poly_type("T -> T -> Bool"),
+    "gt":      parse_poly_type("T -> T -> Bool"),
+    "lt":      parse_poly_type("T -> T -> Bool"),
+    "geq":     parse_poly_type("T -> T -> Bool"),
+    "leq":     parse_poly_type("T -> T -> Bool"),
     # Boolean operators
-    "True":    poly_type("Bool"),
-    "False":   poly_type("Bool"),
-    "not":     poly_type("Bool -> Bool"),
-    "and":     poly_type("Bool -> Bool -> Bool"),
-    "or":      poly_type("Bool -> Bool -> Bool"),
+    "True":    parse_poly_type("Bool"),
+    "False":   parse_poly_type("Bool"),
+    "not":     parse_poly_type("Bool -> Bool"),
+    "and":     parse_poly_type("Bool -> Bool -> Bool"),
+    "or":      parse_poly_type("Bool -> Bool -> Bool"),
     # List utilities
-    "nil":     poly_type("List T"),
-    "is_nil":  poly_type("List T -> Bool"),
-    "lfold":   poly_type("List A -> B -> (B -> A -> A) -> B"),
-    "rfold":   poly_type("List A -> (A -> B -> B) -> B -> B"),
-    "map":     poly_type("List A -> (A -> B) -> List B"),
-    "filter":  poly_type("List A -> (A -> Bool) -> List A"),
-    "zip":     poly_type("List T -> List T -> List (List T)"),
-    "length":  poly_type("List A -> Int"),
-    "range":   poly_type("Int -> Int -> List Int"),
-    "cons":    poly_type("T -> List T -> List T"),
-    "head":    poly_type("List T -> T"),
-    "tail":    poly_type("List T -> List T"),
-    "append":  poly_type("List T -> T -> List T"),
-    "reverse": poly_type("List T -> List T"),
-    "sort":    poly_type("List T -> List T"),
-    "flatten": poly_type("List List T -> List T"),
+    "nil":     parse_poly_type("List T"),
+    "is_nil":  parse_poly_type("List T -> Bool"),
+    "lfold":   parse_poly_type("List A -> B -> (B -> A -> A) -> B"),
+    "rfold":   parse_poly_type("List A -> (A -> B -> B) -> B -> B"),
+    "map":     parse_poly_type("List A -> (A -> B) -> List B"),
+    "filter":  parse_poly_type("List A -> (A -> Bool) -> List A"),
+    "zip":     parse_poly_type("List T -> List T -> List (List T)"),
+    "length":  parse_poly_type("List A -> Int"),
+    "range":   parse_poly_type("Int -> Int -> List Int"),
+    "cons":    parse_poly_type("T -> List T -> List T"),
+    "head":    parse_poly_type("List T -> T"),
+    "tail":    parse_poly_type("List T -> List T"),
+    "append":  parse_poly_type("List T -> T -> List T"),
+    "reverse": parse_poly_type("List T -> List T"),
+    "sort":    parse_poly_type("List T -> List T"),
+    "flatten": parse_poly_type("List List T -> List T"),
     # String manipulation
-    "concat":  poly_type("String -> String -> String"),
-    "substr":  poly_type("String -> Int -> Int -> String"),
-    "split":   poly_type("String -> String -> List String"),
-    "join":    poly_type("List String -> String -> String"),
+    "concat":  parse_poly_type("String -> String -> String"),
+    "substr":  parse_poly_type("String -> Int -> Int -> String"),
+    "split":   parse_poly_type("String -> String -> List String"),
+    "join":    parse_poly_type("List String -> String -> String"),
     # Conversion
-    "show":    poly_type("T -> String"),
-    "read":    poly_type("String -> Int"),
+    "show":    parse_poly_type("T -> String"),
+    "read":    parse_poly_type("String -> Int"),
     # Utility/functional
-    "print":   poly_type("T -> T"),
-    "id":      poly_type("A -> A"),
-    "compose": poly_type("(B -> C) -> (A -> B) -> A -> C"),
+    "print":   parse_poly_type("T -> T"),
+    "id":      parse_poly_type("A -> A"),
+    "compose": parse_poly_type("(B -> C) -> (A -> B) -> A -> C"),
 }
 
 KNOWN_VARS = set(BUILTINS.keys())
