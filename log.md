@@ -288,3 +288,107 @@ We probably also want to annotate these functions with extra context. A simple
 solution is generating docstrings for each generated sub-expression. A more
 complicated but probably necessary addition relies on computing the type of each
 expression.
+
+### Day 15
+
+Prompt for initial training run:
+```
+# Constrains
+
+* `String`'s are represented as `List Char`'s.
+* Support for partial applition exists.
+* You are allowed to provide answers in a point-free form.
+
+Example 1: Double each element in a list
+`lambda lst. map lst (* 2)`
+
+Example 2: Filter even numbers
+`lambda lst. filter lst (lambda x. eq (mod x 2) 0)`
+
+# Functions availabe in the language
+
+### Arithmetic primitives
+
+add :: T -> T -> T
++ :: T -> T -> T
+mul :: T -> T -> T
+* :: T -> T -> T
+sub :: T -> T -> T
+- :: T -> T -> T
+div :: T -> T -> T
+/ :: T -> T -> T
+mod :: T -> T -> T
+% :: T -> T -> T
+pow :: T -> T -> T
+** :: T -> T -> T
+
+### Comparisons
+
+if :: T -> A -> B
+eq :: T -> T -> Bool
+neq :: T -> T -> Bool
+gt :: T -> T -> Bool
+lt :: T -> T -> Bool
+geq :: T -> T -> Bool
+leq :: T -> T -> Bool
+
+### Boolean operators
+
+True :: Bool
+False :: Bool
+not :: Bool -> Bool
+and :: Bool -> Bool -> Bool
+or :: Bool -> Bool -> Bool
+
+### List utilities
+
+nil :: List T
+is_nil :: List T -> Bool
+lfold :: List A -> B -> (B -> A -> A) -> B == lfold lst acc (lambda acc x. ...) 
+rfold :: List A -> (A -> B -> B) -> B -> B == lfold lst (lambda x acc. ...) acc
+map :: List A -> (A -> B) -> List B
+filter :: List A -> (A -> Bool) -> List A
+zip :: List T -> List T -> List (List T)
+length :: List A -> Int
+range :: Int -> Int -> List Int
+cons :: T -> List T -> List T
+head :: List T -> T
+tail :: List T -> List T
+append :: List T -> T -> List T
+reverse :: List T -> List T
+sort :: List T -> List T
+flatten :: List List T -> List T
+
+### String manipulation
+
+concat :: String -> String -> String
+substr :: String -> Int -> Int -> String
+split :: String -> String -> List String
+join :: List String -> String -> String
+
+### Conversion
+
+show :: T -> String
+read :: String -> Int
+
+### Utility/functional
+
+id :: A -> A
+compose :: (B -> C) -> (A -> B) -> A -> C
+
+# Task
+
+[3, 9, 1, 5] -> [9, 5, 3, 1]
+[1, 3] -> [3, 1]
+[30, 10, 20] -> [30, 20, 10]
+
+synthesize a lambda calculus function that maps these example inputs to their corresponding outputs:
+```
+
+### Getting stuck on constained gen
+
+Maybe try stripping valid tokens and then filter more to restrict output space?
+
+#### Type guided constrained generation.
+If we have the generation `lambda xs.filter xs ` we know the next item must
+either be a function of type `A -> Bool` or some lambda abstraction.
