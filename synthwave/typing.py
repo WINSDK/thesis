@@ -149,6 +149,11 @@ def _infer(expr, env: Env, subst: Subst) -> Tuple[Type, Subst]:
         case Ops.Appl:
             func, *args = expr.args
             func_ty, subst = _infer(func, env, subst)
+            # Special case for Church boolean application
+            func_ty = apply_subst(func_ty, subst)
+            if func_ty.t == T.Bool:
+                v = fresh_type_var()
+                func_ty = Type.arrow([v, v], v)
             for a in args:
                 # For each argument, the function type must be an arrow.
                 param_ty = fresh_type_var()

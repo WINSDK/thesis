@@ -185,10 +185,10 @@ def builtin_pow(x, y):
 
 ### Comparison primitives
 
-true_expr = parse("λt f. t")
-false_expr = parse("λt f. f")
+true_expr = parse("λt f.t")
+false_expr = parse("λt f.f")
 
-if_expr = parse("λc t e. c t e")
+if_expr = parse("λc t e.c t e")
 
 def church_bool(cond):
     return true_expr if cond else false_expr
@@ -215,15 +215,15 @@ def builtin_leq(x, y):
 
 ### Boolean/logical operators
 
-not_expr = parse("λp. p False True", known={"False", "True"})
-and_expr = parse("λp q. p q False", known={"False"})
-or_expr = parse("λp q. p True q", known={"True"})
-xor_expr = parse("λa b. a (not b) b", known={"not"})
+not_expr = parse("λp.p False True", known={"False", "True"})
+and_expr = parse("λp q.p q False", known={"False"})
+or_expr = parse("λp q.p True q", known={"True"})
+xor_expr = parse("λa b.a (not b) b", known={"not"})
 
 ### List and collection utilities
 
 nil_expr = parse("[]")
-is_nil_expr = parse("λxs. eq xs nil", known={"eq", "nil"})
+is_nil_expr = parse("λxs.eq xs nil", known={"eq", "nil"})
 
 def builtin_lfold(xs, acc, f):
     for elem in xs:
@@ -236,11 +236,11 @@ def builtin_rfold(xs, f, acc):
     return acc
 
 map_expr = parse(
-    "λxs f. rfold xs (λx acc. cons (f x) acc) nil",
+    "λxs f.rfold xs (λx acc.cons (f x) acc) nil",
     known={"rfold", "cons", "nil"}
 )
 filter_expr = parse(
-    "λxs p. rfold xs (λx acc. (p x) (cons x acc) acc) nil",
+    "λxs p.rfold xs (λx acc.(p x) (cons x acc) acc) nil",
     known={"rfold", "cons", "nil"}
 )
 
@@ -304,14 +304,20 @@ def builtin_read(s):
 def builtin_show(x):
     return split(str(x))
 
+def builtin_ord(x):
+    return ord(x)
+
+def builtin_chr(x):
+    return chr(x)
+
 ### Utility/functional primitives
 
 def builtin_print(x):
     print(x)
     return x
 
-id_expr = parse("λx. x")
-compose_expr = parse("λf. λg. λx. f (g x)")
+id_expr = parse("λx.x")
+compose_expr = parse("λf g x.f (g x)")
 
 BUILTINS = {
     "True": true_expr,
@@ -366,6 +372,8 @@ BUILTINS = {
     # Conversion
     "show": external_fn(builtin_show),
     "read": external_fn(builtin_read),
+    "ord":  external_fn(builtin_ord),
+    "chr":  external_fn(builtin_chr),
     # Utility/functional
     "print": external_fn(builtin_print),
     "id": id_expr,
@@ -425,6 +433,8 @@ BUILTIN_SCHEMES = {
     # Conversion
     "show":    parse_poly_type("T -> String"),
     "read":    parse_poly_type("String -> Int"),
+    "ord":     parse_poly_type("Char -> Int"),
+    "chr":     parse_poly_type("Int -> Char"),
     # Utility/functional
     "print":   parse_poly_type("T -> T"),
     "id":      parse_poly_type("A -> A"),

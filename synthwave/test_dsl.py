@@ -83,7 +83,7 @@ def test_appl_multi():
 
 
 def test_nested():
-    outer = parse("λx y. (λz.+ x z) (mul y 2)")
+    outer = parse("λx y.(λz.+ x z) (mul y 2)")
     # Apply outer to 5, 10
     expr = UOp(Ops.Appl, [outer, val(5), val(10)])
     assert evaluate(expr) == 25
@@ -105,11 +105,11 @@ def test_map_add5():
     assert expr.args[0] == [6, 7, 8]
 
 def test_sort_then_reverse():
-    expr = define("reverse (sort [3, 1, 2])")
+    expr = define("reverse (sort [3,1,2])")
     assert expr.args[0] == [3, 2, 1]
 
 def test_sort_reverse_map():
-    expr = define("reverse (sort (map [1, 5, 10, 30] (Lx. add 3 (mul x 2))))")
+    expr = define("reverse (sort (map [1,5,10,30] (Lx.add 3 (mul x 2))))")
     assert expr.args[0] == [63, 23, 13, 5]
 
 def test_closure_call():
@@ -163,7 +163,7 @@ def test_infer_val():
 def test_infer_abstr_single():
     # λx. x + 1 => Int -> Int
     # Because x must be an Int to do (x + 1).
-    expr = define("(λx. add x 1)")
+    expr = define("(λx.add x 1)")
     ty = infer(expr)
     assert str(ty) == "Int -> Int"
 
@@ -266,7 +266,7 @@ def test_infer_type_error():
 def test_infer_map_add5():
     # map [1, 2, 3] (add 5) => Int List
     # Partially applying `add` with 5
-    expr = define("map [1, 2, 3] (add 5)")
+    expr = define("map [1,2,3] (add 5)")
     ty = infer(expr)
     assert str(ty) == "Int List"
 

@@ -1,6 +1,6 @@
-from datasets import Dataset, IterableDataset, DatasetDict
+from datasets import Dataset, DatasetDict
 from .helpers import MODEL_DIR, error
-from typing import Dict, Union, Optional, Callable
+from typing import Dict, Union, Optional, Callable, Generator
 from dataclasses import dataclass
 from pathlib import Path
 import math
@@ -63,6 +63,35 @@ class FastLanguageModel(nn.Module):
     use_rslora: bool
 
 def get_peft_model(**kwargs): return FastLanguageModel(**kwargs)
+
+def generate(
+    prompt: mx.array, model: nn.Module, temp: float = 0.0
+) -> Generator[mx.array, None, None]:
+    """
+    Generate text based on the given prompt and model.
+
+    Args:
+        prompt (mx.array): The input prompt.
+        model (nn.Module): The model to use for generation.
+        temp (float): The temperature for sampling. If temp is 0, use max sampling.
+
+    Yields:
+        mx.array: The generated text.
+    """
+    def sample(logits: mx.array) -> mx.array:
+        return (
+            mx.argmax(logits, axis=-1)
+            if temp == 0
+            else mx.random.categorical(logits * (1 / temp))
+        )
+
+    y = prompt
+    cache = None
+    while True:
+        logits, cache = model(y[None], cache=cache)
+        logits = logits[:, -1, :]
+        y = sample(logits)
+        yield y
 
 @dataclass
 class Trainer:

@@ -43,12 +43,20 @@ def load_model(repo_id: str):
     if not model_path.exists():
         download_model(repo_id, model_path)
     if IS_MACOS:
-        from synthwave.mlx import load
-        return load(model_path)
+        from transformers import AutoTokenizer, AutoModelForCausalLM
+        tokenizer = AutoTokenizer.from_pretrained(str(model_path))
+        model = AutoModelForCausalLM.from_pretrained(
+            str(model_path),
+            device_map="mps"
+        )
+        return model, tokenizer
     else:
         from unsloth import FastLanguageModel
         return FastLanguageModel.from_pretrained(
-            model_name=str(model_path), dtype=None, load_in_4bit=True
+            model_name=str(model_path),
+            dtype=None,
+            load_in_4bit=True,
+            fast_inference=True
         )
 
 def fn_parameters(f):
