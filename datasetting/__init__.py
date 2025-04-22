@@ -28,6 +28,7 @@ class Prompt:
         examples = []
         for line in lines[1:]:
             lhs, rhs = line.split('->')
+            lhs, rhs = lhs.strip(), rhs.strip()
             examples.append((lhs, rhs))
         return Prompt(ty, examples)
 

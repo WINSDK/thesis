@@ -9,12 +9,12 @@ def correctness_check(dataset: Dataset):
         prompt = Prompt.of_dataset(prompt)
         func = parse(answer, known=KNOWN_VARS)
         for input, output in prompt.examples:
-            input = parse(input.strip())
+            input = parse(input)
             try:
                 solution = pretty_print(func(input))
             except Exception as e:
                 raise ValueError(answer) from e
-            assert solution == output.strip(), f"{answer} does not map"
+            assert solution == output, f"{answer} does not map"
 
 def test_handcrafted():
     correctness_check(datasetting.handcrafted)
