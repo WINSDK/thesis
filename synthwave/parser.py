@@ -19,8 +19,8 @@ application  : atom (WS atom)*                        -> appl
 list_lit     : "[" "]"
              | "[" literal ("," literal)* "]"
 
-?literal     : SIGNED_FLOAT                         -> float_lit
-             | SIGNED_INT                           -> int_lit
+?literal     : FLOAT                                -> float_lit
+             | INTEGER                              -> int_lit
              | BOOL                                 -> bool_lit
              | CHAR                                 -> char_lit
              | STRING                               -> string_lit
@@ -29,13 +29,15 @@ list_lit     : "[" "]"
 LAMBDA.2     : ("lambda" WS) | "L" | "λ"
 BOOL         : "True" | "False"
 CHAR         : "'" ( /\\./ | /[^\\']/ ) "'"       // escaped or raw char
-STRING       : "\"" /[a-zA-Z0-9 ]+/ "\""
+STRING       : "\"" /[a-zA-Z0-9 ]*/ "\""
+FLOAT.3      : ["+"|"-"] DECIMAL
+INTEGER.2    : SIGNED_INT
 
 IDENT1       : /[a-zA-Z_+\-*\/=%><!&|^~]+/
 IDENT2       : /[a-zA-Z_+\-*\/=%><!&|^~]+/
-SIGNED_FLOAT : SIGNED_INT "." /[0-9]*/
 
 %import common.SIGNED_INT
+%import common.DECIMAL
 WS           : " "
 """
 

@@ -9,4 +9,4 @@
 #SBATCH --time=12:00:00
 
 source venv/bin/activate
-python main.py --inference --home /scratch-shared/$USER/
+python main.py --train --home /scratch-shared/$USER/

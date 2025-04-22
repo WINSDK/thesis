@@ -175,6 +175,9 @@ def builtin_sub(x, y):
     return x - y
 
 def builtin_div(x, y):
+    # a / 0 == 0, we just allow this
+    if y == 0:
+        return 0
     return x // y
 
 def builtin_mod(x, y):
@@ -255,6 +258,15 @@ def builtin_range(start, end):
 
 def builtin_cons(x, xs):
     return [x] + xs
+
+# Input:
+# Int -> List Int
+# 5 -> [1,3,6,10,15]
+# 3 -> [1,3,6]
+# 1 -> [1]
+# 0 -> []
+# Output:
+# lambda n.lfold (range 0 n) nil (lambda acc x.append acc (add x (if (is_nil acc) 0 (head acc))))
 
 def builtin_head(xs):
     return xs[0]

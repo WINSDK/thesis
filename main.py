@@ -269,55 +269,13 @@ def train():
     print("Loading pretrained model. This may take a while...")
     model, tokenizer = synthwave.load_model(ARGS.model_name)
     print("Model loaded")
-    EOS_TOKEN = tokenizer.eos_token  # Must add EOS_TOKEN
 
+    # EOS_TOKEN = tokenizer.eos_token  # Must add EOS_TOKEN
 
-    def formatting_prompts_func(examples):
-        instructions = examples["instruction"]
-        inputs = examples["input"]
-        outputs = examples["output"]
-        texts = []
-        for instruction, input, output in zip(instructions, inputs, outputs):
-            text = prompt.format(instruction, input, output) + EOS_TOKEN
-            texts.append(text)
-        return {"text": texts}
-
-    # Create a super basic test dataset with just a few examples
-    basic_data = {
-        "instruction": [
-            "Summarize the following text",
-            "Translate this to French",
-            "Explain this concept",
-            "Write a poem about",
-            "List five advantages of",
-            "Provide examples of",
-        ],
-        "input": [
-            "The quick brown fox jumps over the lazy dog.",
-            "Hello world",
-            "Machine learning is a subset of artificial intelligence",
-            "autumn leaves falling",
-            "renewable energy",
-            "good leadership qualities",
-        ],
-        "output": [
-            "A fox quickly jumps over a dog.",
-            "Bonjour le monde",
-            "Machine learning is an AI approach where systems learn patterns from data",
-            "Golden leaves drift down\nDancing in the autumn breeze\nNature's last hurrah",
-            "Renewable energy is sustainable, reduces pollution, creates jobs, promotes energy independence, and has lower operating costs.",
-            "Good leaders demonstrate empathy, clear communication, decisiveness, integrity, and the ability to inspire others.",
-        ],
-    }
-
-    # Convert to HuggingFace Dataset format
-    dataset = Dataset.from_dict(basic_data)
-    print("Dataset initialized")
-
-    # Use the same formatting function as before
-    dataset = dataset.map(formatting_prompts_func, batched=True)
-    print("Data is formatted and ready!")
-
+    import datasetting
+    import rewards
+    dataset = datasetting.handcrafted
+    print(dataset[0])
 
     # Split into train/test with appropriate size for small dataset
     datasets = dataset.train_test_split(test_size=0.33)
@@ -329,8 +287,6 @@ def train():
     print("Starting training")
     model = get_peft_model(
         model,
-        load_in_4bit=True, 
-        fast_inference=True, 
         r=256,
         lora_alpha=24,
         lora_dropout=0,

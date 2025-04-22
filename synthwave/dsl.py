@@ -136,9 +136,8 @@ def pretty_print(expr) -> str:
     if isinstance(expr, str):
         return expr
     if isinstance(expr, list) and len(expr) > 0:
-        p = (pretty_print(e) for e in expr)
         if isinstance(expr[0], str):
-            return '"' + "".join(p) + '"'
+            return '"' + "".join(expr) + '"'
         else:
-            return "[" + ", ".join(p) + "]"
+            return "[" + ",".join(pretty_print(e) for e in expr) + "]"
     return str(expr)
