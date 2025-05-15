@@ -1,6 +1,6 @@
 from typing import Dict, Tuple
 from .eval import BUILTIN_SCHEMES
-from .dsl import UOp, Ops, T, Type, Scheme, TVar
+from .dsl import UOp, Ops, T, Type, Scheme, TVar, fresh_type_var
 
 PRIMITIVES = [t.value for t in T if t.value not in [T.List, T.Arrow]]
 
@@ -12,10 +12,7 @@ def apply_subst(ty: Type, subst: Subst) -> Type:
         if ty in subst:
             return apply_subst(subst[ty], subst)
         return ty
-    elif len(ty.params) > 0:
-        return Type(ty.t, [apply_subst(t, subst) for t in ty.params])
-    else:
-        return ty
+    return Type(ty.t, [apply_subst(t, subst) for t in ty.params])
 
 def occurs_in_type(tv: TVar, ty: Type, subst: Subst) -> bool:
     ty = apply_subst(ty, subst)
@@ -58,11 +55,6 @@ def unify(t1: Type, t2: Type, subst: Subst) -> Subst:
     else:
         raise TypeError(f"Cannot unify {t1} with {t2}")
 
-def fresh_type_var(prefix="a", counter=[0]) -> Type:
-    name = f"{prefix}{counter[0]}"
-    counter[0] += 1
-    return TVar(name)
-
 def generalize(env: Dict[str, Scheme], ty: Type) -> Scheme:
     env_ft = set()
     for scheme in env.values():
@@ -74,7 +66,7 @@ def generalize(env: Dict[str, Scheme], ty: Type) -> Scheme:
 def instantiate(scheme: Scheme) -> Type:
     mapping = {}
     for var in scheme.vars:
-        mapping[var] = fresh_type_var(var.name)
+        mapping[var] = fresh_type_var(var.name, generic=var.generic)
     return apply_subst(scheme.ty, mapping)
 
 def infer_py_ty(expr, env: Env, subst: Subst) -> Tuple[Type, Subst]:
@@ -103,7 +95,8 @@ def infer_py_ty(expr, env: Env, subst: Subst) -> Tuple[Type, Subst]:
 def lookup(varname: str, env: Env, subst: Subst) -> Tuple[Type, Subst]:
     if varname in env:
         # Instantiate the scheme to get a fresh copy of the type.
-        return (instantiate(env[varname]), subst)
+        ty = instantiate(env[varname])
+        return (ty, subst)
     else:
         raise NameError(f"Unbound variable {varname}")
 

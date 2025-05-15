@@ -94,6 +94,15 @@ class Type:
             case T.Arrow:
                 return " -> ".join(map(str, self.params))
 
+    def __eq__(self, other):
+        t1_isvar = isinstance(self, TVar)
+        t2_isvar = isinstance(other, TVar)
+        if t1_isvar or t2_isvar:
+            if t1_isvar and t2_isvar:
+                return self.name == other.name
+            return False
+        return self.t == other.t and all(t1 == t2 for t1, t2 in zip(self.params, other.params))
+
     def free_vars(self) -> set:
         if isinstance(self, TVar):
             return {self}
@@ -141,3 +150,9 @@ def pretty_print(expr) -> str:
         else:
             return "[" + ",".join(pretty_print(e) for e in expr) + "]"
     return str(expr)
+
+
+def fresh_type_var(prefix="a", counter=[0], generic=False) -> TVar:
+    name = f"{prefix}{counter[0]}"
+    counter[0] += 1
+    return TVar(name, generic)

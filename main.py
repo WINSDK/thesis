@@ -1,6 +1,7 @@
 import regex
+import random
 import os
-from rewards import match_format_exactly
+import string
 
 def parse_args():
     import argparse
@@ -38,110 +39,6 @@ def parse_args():
     parser.add_argument("--train", action="store_true")
     parser.add_argument("--inference", action="store_true")
     return parser.parse_args()
-
-PROMPT = """
-# Constrains
-
-* `String`'s are represented as `List Char`'s.
-* Support for partial applition exists.
-* You are allowed to provide answers in a point-free form.
-
-# Functions availabe in the language
-
-### Arithmetic primitives
-
-add :: T -> T -> T
-+ :: T -> T -> T
-mul :: T -> T -> T
-* :: T -> T -> T
-sub :: T -> T -> T
-- :: T -> T -> T
-div :: T -> T -> T
-/ :: T -> T -> T
-mod :: T -> T -> T
-% :: T -> T -> T
-pow :: T -> T -> T
-** :: T -> T -> T
-
-### Comparisons
-
-if :: T -> A -> B
-eq :: T -> T -> Bool
-neq :: T -> T -> Bool
-gt :: T -> T -> Bool
-lt :: T -> T -> Bool
-geq :: T -> T -> Bool
-leq :: T -> T -> Bool
-
-### Boolean operators
-
-True :: Bool
-False :: Bool
-not :: Bool -> Bool
-and :: Bool -> Bool -> Bool
-or :: Bool -> Bool -> Bool
-
-### List utilities
-
-nil :: List T
-is_nil :: List T -> Bool
-lfold :: List A -> B -> (B -> A -> A) -> B == lfold lst acc (lambda acc x. ...) 
-rfold :: List A -> (A -> B -> B) -> B -> B == lfold lst (lambda x acc. ...) acc
-map :: List A -> (A -> B) -> List B
-filter :: List A -> (A -> Bool) -> List A
-zip :: List T -> List T -> List (List T)
-length :: List A -> Int
-range :: Int -> Int -> List Int
-cons :: T -> List T -> List T
-head :: List T -> T
-tail :: List T -> List T
-append :: List T -> T -> List T
-reverse :: List T -> List T
-sort :: List T -> List T
-flatten :: List List T -> List T
-
-### String manipulation
-
-concat :: String -> String -> String
-substr :: String -> Int -> Int -> String
-split :: String -> String -> List String
-join :: List String -> String -> String
-
-### Conversion
-
-show :: T -> String
-read :: String -> Int
-ord  :: Char -> Int
-chr  :: Int -> Char
-
-### Utility/functional
-
-id :: A -> A
-compose :: (B -> C) -> (A -> B) -> A -> C
-
-# Task
-
-I will begin by giving you several examples of input-output pairs.
-You will then be given a new input, and you must provide the corresponding output.
-
-Input 1:
-[1, 2, 3] -> [2, 4, 6]
-[] -> []
-[9, 9] -> [18, 18]
-Output 1:
-lambda xs.map xs (* 2)
-
-Input 2:
-[1, 2, 3, 6] -> [2, 6]
-[9, 8] -> [8]
-[1, 2, 3, 4, 5, 6] -> [2, 4, 6]
-Output 2:
-lambda xs.filter xs (lambda x.eq (mod x 2) 0)
-
-Input 3:
-{}
-Output 3:
-"""
 
 # Start with the assumption that no tokens are allowed.
 # 
@@ -184,7 +81,7 @@ def allowed_tokens(tokenizer, inputs_len):
                     if not match:
                         continue
                     # Exact matches are preferred sometimes
-                    if not match.partial and term.name not in ["SIGNED_INT"]:
+                    if not match.partial and term.name not in ["INTEGER"]:
                         matching[token] = id
                         continue
                     # Find maybe a shorter token shortest match
@@ -226,13 +123,12 @@ def inference():
     # indices = set(v for k, v in tokenizer.vocab.items() if len(k) == 1)
     # print(indices)
 
-    example = """\
+    prompt = f"""\
 [3, 9, 1, 5] -> [9, 5, 3, 1]
 [1, 3] -> [3, 1]
-[30, 10, 20] -> [30, 20, 10]
-    """
-
-    prompt = PROMPT.format(example) + tokenizer.eos_token
+[30, 10, 20] -> [30, 20, 10]\
+{tokenizer.eos_token}\
+"""
 
     print("Starting inference")
     with torch.no_grad():
@@ -253,35 +149,24 @@ def inference():
         print("\nResponse:")
         print(tokenizer.decode(sequence))
 
-def check_accuracy(x, indices, functions):
-    function = functions[indices]
-    accuracy = 0
-    for inp, out in x['examples']:
-        if out == function(inp):
-            accuracy += 1/len(x['examples'])
-    return {'accuracy': accuracy}
-
 def train():
     from trl import GRPOConfig, GRPOTrainer
     from synthwave.torch import get_peft_model
     from synthwave import MODEL_DIR
+    import datasetting
+    import rewards
 
     print("Loading pretrained model. This may take a while...")
     model, tokenizer = synthwave.load_model(ARGS.model_name)
     print("Model loaded")
 
-    # EOS_TOKEN = tokenizer.eos_token  # Must add EOS_TOKEN
-
-    import datasetting
-    import rewards
-    dataset = datasetting.handcrafted
-    print(dataset[0])
+    dataset = datasetting.transform("handcrafted", datasetting.handcrafted)
 
     # Split into train/test with appropriate size for small dataset
-    datasets = dataset.train_test_split(test_size=0.33)
-    print(
-        f"Training examples: {len(datasets['train'])}, Test examples: {len(datasets['test'])}"
-    )
+    # datasets = dataset.train_test_split(test_size=0.33)
+    # print(
+    #     f"Training examples: {len(datasets['train'])}, Test examples: {len(datasets['test'])}"
+    # )
 
     # Train model
     print("Starting training")
@@ -296,11 +181,12 @@ def train():
         loftq_config=None,
         random_state=ARGS.seed,
     )
+
     FastLanguageModel.for_training(model)
     trainer = GRPOTrainer(
         model=model,
         processing_class=tokenizer,
-        reward_funcs=[],
+        reward_funcs=[rewards.valid_syntax, rewards.diverse_output],
         args=GRPOConfig(
             output_dir=str(MODEL_DIR / "finedtuned"),
             use_vllm = True, 
@@ -326,15 +212,55 @@ def train():
             # Can use Weights & Biases
             report_to="none",
         ),
-        train_dataset=datasets["train"],
-        eval_dataset=datasets["test"],
+        train_dataset=dataset,
+        # eval_dataset=datasets["test"],
     )
     trainer.train()
     trainer.save_model()
     trainer.save_state()
 
 
+def weighted_choice(arr, alpha_weight=10):
+    from synthwave.parser import IDENT, DIGIT, BOOLEAN, LAMBDA, DOT, WS, Modi
+    non_terminal = random.choice(arr)
+    if non_terminal.modi == Modi.Many:
+        n = random.random() % 5 + 1
+        print(non_terminal.chars)
+        random.choices(non_terminal.chars, k=n)
+
+    # priority = string.ascii_letters + string.digits + "(" + ")" + "]" + "[" + "lambda" + "." + " "
+    # weights = [
+    #     alpha_weight if item in priority else 1
+    #     for item in arr
+    # ]
+    return random.choices(arr, weights=weights, k=1)[0]
+
 def main():
+    from synthwave.eval import KNOWN_VARS
+    from synthwave.parser import parse_inc2
+
+    # for _ in range(10):
+    #     seq = ""
+    #     while True:
+    #         parsed, expect = parse_inc2(seq, known=KNOWN_VARS, strict=True)
+    #         if parsed:
+    #             if len(seq) < 10:
+    #                 seq = ""
+    #                 continue
+    #             print(seq)
+    #             print(parsed)
+    #             break
+    #         seq += weighted_choice(expect)
+
+    # print(parse_inc2("", known=KNOWN_VARS))
+    print(parse_inc2("add ", known=KNOWN_VARS))
+    # print(parse_inc2("add 1 ", known=KNOWN_VARS))
+    # print(parse_inc2("add 1 2 ", known=KNOWN_VARS))
+    # print(parse_inc2("map [", known=KNOWN_VARS))
+    # print(parse_inc2("if ", known=KNOWN_VARS))
+    # print(parse_inc2("(lambda ABC x.1)", known=KNOWN_VARS))
+    exit(1)
+
     if ARGS.repl:
         from synthwave import parse, evaluate, infer, pretty_print
         from synthwave.eval import KNOWN_VARS

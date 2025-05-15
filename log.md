@@ -29,6 +29,7 @@ In functional languages based on lambda calculus, all functions take exactly one
 * [Drawing lambda terms.](https://cs.gmu.edu/~marks/463/slides/1.lambda_calculus/drawingtrees.html)
 * [Fun example of an interactive calculus.](https://treecalcul.us)
 * [Deepseek inference.](https://github.com/deepseek-ai/open-infra-index/blob/main/202502OpenSourceWeek/day_6_one_more_thing_deepseekV3R1_inference_system_overview.md)
+* [OCaml merlin.](https://arxiv.org/pdf/1807.06702)
 
 ## Eta reduction
 
@@ -392,3 +393,4 @@ Maybe try stripping valid tokens and then filter more to restrict output space?
 #### Type guided constrained generation.
 If we have the generation `lambda xs.filter xs ` we know the next item must
 either be a function of type `A -> Bool` or some lambda abstraction.
+

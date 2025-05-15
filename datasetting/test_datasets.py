@@ -5,10 +5,10 @@ from synthwave import parse, pretty_print
 from synthwave.eval import KNOWN_VARS
 
 def correctness_check(dataset: Dataset):
-    for prompt, answer in zip(dataset["prompt"], dataset["answer"]):
-        prompt = Prompt.of_dataset(prompt)
+    for example, answer in zip(dataset["example"], dataset["answer"]):
+        example = Prompt.of_str(example)
         func = parse(answer, known=KNOWN_VARS)
-        for input, output in prompt.examples:
+        for input, output in example.examples:
             input = parse(input)
             try:
                 solution = pretty_print(func(input))

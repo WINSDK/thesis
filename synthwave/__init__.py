@@ -2,7 +2,7 @@ from .helpers import load_model, IS_MACOS, MODEL_DIR
 from .eval import evaluate
 from .dsl import UOp, ExternalError, pretty_print
 from .typing import infer, Type, Scheme
-from .parser import parse, parse_poly_type
+from .parser import parse, parse_inc, parse_poly_type
 import os
 
 # For some reason unsloth collects statistics when running
@@ -18,6 +18,7 @@ __all__ = [
     "Scheme",
     "Type",
     "parse",
+    "parse_inc",
     "parse_poly_type",
     "infer",
     "evaluate",
