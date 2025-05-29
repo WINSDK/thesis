@@ -173,23 +173,6 @@ def parse_handcraft(path):
 
 handcrafted = parse_handcraft(ROOT / "handcrafted.txt")
 
-def transform_metaset3_to_messages(item):
-    """Transform metaset3 item to GRPO-compatible format matching PROMPT structure"""
-    # Format test cases as input -> output pairs only
-    examples = []
-    for test in item["tests"]:
-        # Extract input values in order of function args
-        input_vals = [str(test["input"][arg]) for arg in item["args"].keys()]
-        if len(input_vals) == 1:
-            input_str = input_vals[0]
-        else:
-            input_str = f"[{', '.join(input_vals)}]"
-        examples.append(f"{input_str} -> {test['output']}")
-
-    example_text = "\n".join(examples)
-
-    return transform_to_messages(example_text)
-
 def flatten_tree_to_lambda(tree):
     """Convert nested list tree structure to lambda expression string"""
     if isinstance(tree, str):
@@ -210,36 +193,35 @@ def flatten_tree_to_lambda(tree):
         return str(tree)
 
 def load_metaset3_dataset(split="train"):
-    """Load metaset3 dataset for GRPO training"""
     import json
 
     file_path = ROOT / f"metaset3.{split}.jsonl"
     items = []
 
-    with open(file_path, 'r') as f:
+    with open(file_path, "r") as f:
         for line in f:
             item = json.loads(line.strip())
 
             # Format input-output examples properly
             examples = []
+            tests = []
             for test in item["tests"]:
                 if len(item["args"]) == 1:
                     input_val = str(test["input"][list(item["args"].keys())[0]])
                 else:
                     input_val = str(list(test["input"].values()))
-                examples.append(f"{input_val} -> {test['output']}")
+                output_val = test["output"]
+                examples.append(f"{input_val} -> {output_val}")
+                tests.append([input_val, str(output_val)])
 
             transformed = transform("metaset3", {
                 "example": "\n".join(examples),
                 "answer": flatten_tree_to_lambda(item["short_tree"])
             })
             transformed.update({
-                "target_program": str(item["short_tree"]),
-                "tests": str(item["tests"]),
-                "task_text": " ".join(item["text"]),
-                "args_info": str(item["args"]),
+                "tests": tests,
+                "args_info": list(item["args"].values()),
                 "return_type": item["return_type"],
-                "nodes": str(item["nodes"])
             })
             items.append(transformed)
 

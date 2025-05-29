@@ -260,6 +260,13 @@ def main():
 if __name__ == "__main__":
     ARGS = parse_args()
     os.chdir(ARGS.home)
+
+    # import datasetting
+    # d = datasetting.load_metaset3_dataset("train")
+    # print(d["tests"][100])
+    # print(d["args_info"][100])
+    # exit(0)
+
     # Must come first
     if ARGS.train:
         from unsloth import FastLanguageModel, is_bfloat16_supported, PatchFastRL

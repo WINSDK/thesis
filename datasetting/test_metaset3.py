@@ -1,4 +1,4 @@
-from datasetting import load_metaset3_dataset, transform_metaset3_to_messages
+from datasetting import load_metaset3_dataset
 
 def test_metaset3_loading():
     """Test that metaset3 data loads and transforms correctly"""
@@ -42,25 +42,3 @@ def test_transform_function():
         "args": {"a": "int"},
         "return_type": "int"
     }
-
-    messages = transform_metaset3_to_messages(sample_item)
-
-    print(f"Transform result type: {type(messages)}")
-    print(f"Messages: {messages}")
-
-    assert len(messages) == 1
-    assert messages[0]["role"] == "user"
-    assert "content" in messages[0]
-
-    content = messages[0]["content"][0]["text"]
-    print(content)
-    assert "5 -> 0" in content
-    assert "20 -> 1" in content
-    assert "28 -> 2" in content
-
-    print("\n✓ Transform function test passed!")
-
-if __name__ == "__main__":
-    test_transform_function()
-    test_metaset3_loading()
-    print("\n🎉 All tests passed!")
