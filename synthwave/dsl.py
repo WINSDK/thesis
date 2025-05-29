@@ -9,13 +9,13 @@ class Ops(IntEnum):
     # Wrapped python value
     Val = auto()
     # Anything that's `named`: functions, parameters, etc
-    Var = auto()  
+    Var = auto()
     # Application (M N): [body, arg1, arg2, ..]
     Appl = auto()
     # Abstraction (λx.M): [param1, param2, .., body]
-    Abstr = auto() 
+    Abstr = auto()
     # Regular python functions: [param1, param2, .., python_fn]
-    External = auto() 
+    External = auto()
     # Context-specific functions: [param1, param2, .., body, env]
     Closure = auto()
 

@@ -1,68 +1,4 @@
-# Thesis: Optimized Lambda calculus proof checker
-
-## Terminology
-
-Eta-reduction or η-reduction is the process of converting between λx.(f x)
-whenever x is not free in f. That is f = λx.(f x).
-
-### Point-free
-Point-free programming is a programming paradigm in which a
-function definition does not include information regarding its arguments, using
-combinators and function composition `[...]` instead of variables.
-
-```haskell
--- Instead of
-sum (x:xs) = x + (sum xs)
-sum [] = 0
-
--- We do
-sum = foldr (+) 0
-```
-
-This is related to *eta-reduction* (along with some other techniques) in that
-we can rewrite functions in a point-free form.
-
-In functional languages based on lambda calculus, all functions take exactly one argument!
-
-## Reference's
-
-* [Drawing lambda terms.](https://cs.gmu.edu/~marks/463/slides/1.lambda_calculus/drawingtrees.html)
-* [Fun example of an interactive calculus.](https://treecalcul.us)
-* [Deepseek inference.](https://github.com/deepseek-ai/open-infra-index/blob/main/202502OpenSourceWeek/day_6_one_more_thing_deepseekV3R1_inference_system_overview.md)
-* [OCaml merlin.](https://arxiv.org/pdf/1807.06702)
-
-## Eta reduction
-
-It appears you can use type derivations to find the minimal expression
-you can eta-reduce to.
-                           η
-Determining that λx.(f x) ---> f
-```
-x : A   f : A -> B
-------------------
-     f x : B
-------------------
-λx.(f x) : A → B
-```
-
-## Normal form
-
-This terminology is not fully expressive. There's three kinds of normal form:
-beta normal, beta-eta normal and head normal form. When talking about normal form
-we usually refer to beta normal form but this is not the simplest possible form.
-Beta-eta normal form.
-
-An expression is in beta normal form if it is one of the following:
-* A data constructor applied to arguments which are in normal form
-* A lambda abstraction whose body is in normal form
-
-Head normal form:
-* A data constructor applied to some arguments (which may be any expressions at all)
-* A lambda abstraction whose body is in head normal form (or not if weak-head normal form)
-
-Read that weak-head normal form is the most commonly used in real-world compilers. 
-
-# Index
+# Thesis: Program synthesis from LLMs with constrained programming
 
 ### Naive notes
 
@@ -75,6 +11,8 @@ Read that weak-head normal form is the most commonly used in real-world compiler
 * https://arxiv.org/pdf/2403.03997
 * https://huggingface.co/docs/trl/index
 * https://faustocarcassi.com/arc-course/labs/lab3.html
+* [Is Programming by Example solved by LLMs?](https://arxiv.org/pdf/2406.08316)
+* [Available datasets and models on Snellius](https://servicedesk.surf.nl/wiki/spaces/WIKI/pages/62227640/Available+datasets+and+models+on+Snellius)
 
 ### Plan
 
@@ -84,7 +22,7 @@ Read that weak-head normal form is the most commonly used in real-world compiler
 * https://huggingface.co/agentica-org/DeepCoder-14B-Preview
 * Real SOTA might be R1 Qwen distilled but that requires CoT.
 * TRY CHAIN OF THOUGHT MODEL.
-* Generate hundred's of thousands of synthetic examples  
+* Generate hundred's of thousands of synthetic examples
 * What the hell, generate outwards the redex's?
 * Neurosymbolic?
 * How do I get into AI research
@@ -133,7 +71,7 @@ for finetuning.
 
 ### Tokenizer
 
-* Micro optimization: Capitalizing identifiers might help as these are more common 
+* Micro optimization: Capitalizing identifiers might help as these are more common
 
 ### How do we even get this synthetic data?
 
@@ -148,7 +86,7 @@ for a given function.
 This will be done for:
 * Providing more training data during finetuning
 * Helping the model during inference by letting it try on a more diverse
-  set of input's. 
+  set of input's.
 
 # journal
 
@@ -186,7 +124,7 @@ Type-Driving program synthesis (https://people.csail.mit.edu/polikarn/publicatio
 * Bidirectional synthesis
 
 Lambdabeam (https://arxiv.org/pdf/2306.02049):
-* 
+*
 
 Abstractbeam (https://arxiv.org/pdf/2405.17514):
 * Improvement on top of lambdabeam
@@ -345,7 +283,7 @@ or :: Bool -> Bool -> Bool
 
 nil :: List T
 is_nil :: List T -> Bool
-lfold :: List A -> B -> (B -> A -> A) -> B == lfold lst acc (lambda acc x. ...) 
+lfold :: List A -> B -> (B -> A -> A) -> B == lfold lst acc (lambda acc x. ...)
 rfold :: List A -> (A -> B -> B) -> B -> B == lfold lst (lambda x acc. ...) acc
 map :: List A -> (A -> B) -> List B
 filter :: List A -> (A -> Bool) -> List A
@@ -394,3 +332,9 @@ Maybe try stripping valid tokens and then filter more to restrict output space?
 If we have the generation `lambda xs.filter xs ` we know the next item must
 either be a function of type `A -> Bool` or some lambda abstraction.
 
+## Appendix
+
+* [Drawing lambda terms.](https://cs.gmu.edu/~marks/463/slides/1.lambda_calculus/drawingtrees.html)
+* [Fun example of an interactive calculus.](https://treecalcul.us)
+* [Deepseek inference.](https://github.com/deepseek-ai/open-infra-index/blob/main/202502OpenSourceWeek/day_6_one_more_thing_deepseekV3R1_inference_system_overview.md)
+* [OCaml merlin.](https://arxiv.org/pdf/1807.06702)

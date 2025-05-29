@@ -144,7 +144,7 @@ def _infer(expr, env: Env, subst: Subst) -> Tuple[Type, Subst]:
             func_ty, subst = _infer(func, env, subst)
             # Special case for Church boolean application
             func_ty = apply_subst(func_ty, subst)
-            if func_ty.t == T.Bool:
+            if not isinstance(func_ty, TVar) and func_ty.t == T.Bool:
                 v = fresh_type_var()
                 func_ty = Type.arrow([v, v], v)
             for a in args:

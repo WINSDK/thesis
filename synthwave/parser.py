@@ -100,7 +100,7 @@ def parse_inc(src: str, **kwargs):
     assert isinstance(env, set), "parse(..) parameter `known` is not a set"
     ip = term_parser.parse_interactive(src)
     ip.exhaust_lexer()
-    allowed = [] 
+    allowed = []
     for term_name in ip.accepts():
         if term_name == "$END":
             term_def = TerminalDef("$END", PatternStr(""))
@@ -173,7 +173,7 @@ class Modi(IntEnum):
 @dataclass(frozen=True)
 class NonTerminal:
     name: str
-    chars: frozenset[str]
+    tokens: frozenset[str]
     modi: Modi = Modi.Single
 
 IDENT = NonTerminal("IDENT", frozenset(string.ascii_letters + "_+-*/=%><!&|^~"), Modi.Many)
@@ -187,7 +187,7 @@ DOT = NonTerminal("DOT", frozenset({"."}))
 WS = NonTerminal("WS", frozenset({" "}))
 LBRACKET = NonTerminal("LBRACKET", frozenset({"["}))
 RBRACKET = NonTerminal("RBRACKET", frozenset({"]"}))
-LPAREN = NonTerminal("LPARAN", frozenset({"("}))
+LPAREN = NonTerminal("LPAREN", frozenset({"("}))
 RPAREN = NonTerminal("RPARAN", frozenset({")"}))
 
 class Outcome(IntEnum):
@@ -231,7 +231,9 @@ class Parser:
     src: str
     off: int
     env: set[str]
+    untyped: set[str]
     strict: bool # Require all var's to be known
+    in_bracket = False
 
     def err(self, expect=None) -> Result:
         if expect is None:
@@ -255,7 +257,7 @@ class Parser:
         return Result(Outcome.ERR, expect=best_expects, pos=best_fail_pos)
 
     def peek(self, expect):
-        if self.off < len(self.src) and self.src[self.off] in expect.chars:
+        if self.off < len(self.src) and self.src[self.off] in expect.tokens:
             return Result.ok(self.src[self.off])
         return self.err({expect})
 
@@ -308,12 +310,14 @@ class Parser:
             if not (c := self.consume(".", {WS, DOT, IDENT})):
                 return c
             # Save the current env
-            old_env = old_env = self.env.copy()
+            old_env, old_untyped = self.env.copy(), self.untyped.copy()
             self.env.update(params)
+            self.untyped.update(params)
             if not (body := self.parse()):
                 return body
             # Restore the previous env
             self.env = old_env
+            self.untyped = old_untyped
             bt.commit()
             v = UOp(Ops.Abstr, [*params, body.value])
             return Result.ok(v, expect=body.expect)
@@ -342,12 +346,12 @@ class Parser:
 
     def parse_bool(self):
         if self.consume("True", {BOOLEAN}):
-            v = True
+            v = "True"
         elif self.consume("False", {BOOLEAN}):
-            v = False
+            v = "False"
         else:
             return self.err({BOOLEAN})
-        return Result.ok(UOp(Ops.Val, [v])) 
+        return Result.ok(UOp(Ops.Var, [v]))
 
     def parse_string(self):
         with Backtrack(self) as bt:
@@ -359,13 +363,14 @@ class Parser:
                 return c
             bt.commit()
             v = p.value
-            return Result.ok(UOp(Ops.Val, [v])) 
+            return Result.ok(UOp(Ops.Val, [v]))
 
     def parse_lit(self):
         with Backtrack(self) as bt:
             if not (c := self.consume("[", {LBRACKET})):
                 return c
-            p1 = self.parse_literal()
+            if not (p1 := self.parse_literal()):
+                return p1
             vals = [p1.value]
             while True:
                 if not self.consume(",", {COMMA}):
@@ -376,7 +381,7 @@ class Parser:
             if not (c := self.consume("]", {RBRACKET})):
                 return c
             bt.commit()
-            return Result.ok(UOp(Ops.Val, [vals])) 
+            return Result.ok(UOp(Ops.Val, [vals]))
 
     def parse_literal(self):
         return self.choice(
@@ -399,12 +404,13 @@ class Parser:
 
     def parse_braces(self):
         with Backtrack(self) as bt:
-            if not (c := self.consume('(', {LPAREN})):
-                return c
+            if not (c1 := self.consume('(', {LPAREN})):
+                return c1
             if not (p := self.parse()):
                 return p
-            if not (c := self.consume(')', {RPAREN})):
-                return c
+            if not (c2 := self.consume(')', {RPAREN})):
+                c2.expect = p.expect
+                return c2
             bt.commit()
             return p
 
@@ -423,38 +429,44 @@ class Parser:
                 return [ty]
             head, tail = ty.params
             return [head] + decompose(tail)
+        def args_match(a: Type, b: Type):
+            if any(isinstance(x, TVar) and x.generic for x in (a, b)):
+                return True
+            return a == b
         def filter_expects_by_ty(expect, given: Type):
             g_args = decompose(given) # [:-1]
-            def filter(expected):
-                p = Parser(expected, 0, self.env, self.strict)
+            def filter(expected: str):
+                p = Parser(expected, 0, self.env, self.untyped, self.strict)
                 expected_ty = infer(p.parse().value)
                 e_args = decompose(expected_ty)
-                if len(e_args) > len(g_args):
+                if len(e_args) >= len(g_args):
                     return False
                 for g, e in zip(g_args, e_args):
-                    # If g or e are generic, we don't check equality.
-                    if any(isinstance(x, TVar) and x.generic for x in (g, e)):
-                        continue
-                    if g != e:
+                    if not args_match(g, e):
                         return False
                 return True
             results = set()
             for e in expect:
-                if e == LBRACKET:
-                    if isinstance(g_args[0], TVar):
-                        continue
-                    if g_args[0] == Type(T.List):
-                        results.add(e)
-                elif e == QUOTE and g_args[0] == Type(T.Int):
+                if e == LPAREN or e == RPAREN or e == WS:
                     results.add(e)
-                elif e == DIGIT and g_args[0] == Type(T.Int):
+                elif e == LBRACKET and args_match(g_args[0], Type(T.List)):
                     results.add(e)
-                elif e == QUOTE and g_args[0] == Type(T.List, [T.Char]):
+                elif e == QUOTE and args_match(g_args[0], Type(T.Char)):
                     results.add(e)
-                elif e == LPAREN:
+                elif e == DIGIT and args_match(g_args[0], Type(T.Int)):
+                    results.add(e)
+                elif e == QUOTE and args_match(g_args[0], Type(T.List, [T.Char])):
                     results.add(e)
                 elif e.name == "VAR":
-                    for token in e.chars:
+                    for token in e.tokens:
+                        found_untyped = False
+                        for v in self.untyped:
+                            if v.startswith(token):
+                                v = NonTerminal("VAR", frozenset({token}))
+                                results.add(v)
+                                found_untyped = True
+                        if found_untyped:
+                            continue
                         if filter(token):
                             v = NonTerminal("VAR", frozenset({token}))
                             results.add(v)
@@ -487,7 +499,7 @@ def parse2(src: str, **kwargs):
     assert isinstance(strict, bool), "parse(..) parameter `strict` is not a bool"
     env = kwargs.get("known", set()).copy()
     assert isinstance(env, set), "parse(..) parameter `known` is not a set"
-    p = Parser(src, 0, env, strict)
+    p = Parser(src, 0, env, set(), strict)
 
     r = p.parse()
     if r:
@@ -497,16 +509,16 @@ def parse2(src: str, **kwargs):
     # total failure: r has pos and expect filled
     expected = ""
     if len(r.expect) > 0:
-        expect = sorted(list(r.expect))
-        expected = ": expected" + ", ".join(expect)
+        expect = list(r.expect)
+        expected = ": expected" + ", ".join([r.name for r in expect])
     raise SyntaxError(f"Parse error at column {r.pos}{expected}")
 
-def parse_inc2(src: str, **kwargs) -> tuple[Optional[UOp], set[str]]:
+def parse_inc2(src: str, **kwargs) -> tuple[Optional[UOp], set[NonTerminal]]:
     strict = kwargs.get("strict", False)
     assert isinstance(strict, bool), "parse(..) parameter `strict` is not a bool"
     env = kwargs.get("known", set()).copy()
     assert isinstance(env, set), "parse(..) parameter `known` is not a set"
-    p = Parser(src, 0, env, strict)
+    p = Parser(src, 0, env, set(), strict)
     r = p.parse()
     return r.value if r else None, r.expect
 
@@ -516,7 +528,7 @@ def parse_inc2(src: str, **kwargs) -> tuple[Optional[UOp], set[str]]:
 # X -> (+ X X) | (* X X) | (- X X) | (/ X X) | (% X X) | (** X X) | Int
 # Int -> "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | Int Int
 # Float -> Int "." Int | Int "."
-# 
+#
 # Ex. 1
 # {Abstr | Var}
 # lambda {ident}

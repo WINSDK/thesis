@@ -31,7 +31,7 @@ def query_model(config: Dict, model_class):
     return model_class(model_args)
 
 def load_weights(config: Dict, model: llama.Model, model_path: Path):
-    import glob 
+    import glob
     weights = {}
     for weight_path in glob.glob(str(model_path / "*.safetensors")):
         weights.update(mx.load(weight_path))

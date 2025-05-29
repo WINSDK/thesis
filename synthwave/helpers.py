@@ -51,12 +51,11 @@ def load_model(repo_id: str):
         )
         return model, tokenizer
     else:
-        from unsloth import FastLanguageModel
-        return FastLanguageModel.from_pretrained(
+        from unsloth import FastModel
+        return FastModel.from_pretrained(
             model_name=str(model_path),
-            dtype=None,
             load_in_4bit=True,
-            fast_inference=True
+            load_in_8bit=False,
         )
 
 def fn_parameters(f):

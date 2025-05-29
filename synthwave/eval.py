@@ -88,6 +88,7 @@ def substitute(expr, var: str, new_expr):
         return new_expr
     elif expr.op == Ops.Appl:
         body, *args = expr.args
+        body = substitute(body, var, new_expr)
         args = [substitute(e, var, new_expr) for e in args]
         return UOp(Ops.Appl, [body, *args])
     elif expr.op == Ops.Abstr:
@@ -165,6 +166,9 @@ def external_fn(f: Callable):
 
 ### Arithmetic primitives
 
+neg_inf_value = UOp(Ops.Val, [float("-inf")])
+inf_value = UOp(Ops.Val, [float("inf")])
+
 def builtin_add(x, y):
     return x + y
 
@@ -211,10 +215,10 @@ def builtin_lt(x, y):
     return church_bool(x < y)
 
 def builtin_geq(x, y):
-    return church_bool(x <= y)  # note: swapped ordering if needed
+    return church_bool(x >= y)
 
 def builtin_leq(x, y):
-    return church_bool(x >= y)
+    return church_bool(x <= y)
 
 ### Boolean/logical operators
 
@@ -245,6 +249,10 @@ map_expr = parse(
 filter_expr = parse(
     "λxs p.rfold xs (λx acc.(p x) (cons x acc) acc) nil",
     known={"rfold", "cons", "nil"}
+)
+reduce_expr = parse(
+    "λxs f z.rfold xs (λx acc.f acc x) z",
+    known={"rfold"}
 )
 
 def builtin_zip(xs1, xs2):
@@ -285,6 +293,23 @@ def builtin_sort(xs):
 
 def builtin_flatten(xss):
     return [x for xs in xss for x in xs]
+
+min_expr = parse(
+    "λa b.(leq a b) a b",
+    known={"leq"}
+)
+max_expr = parse(
+    "λa b.(leq a b) b a",
+    known={"leq"}
+)
+minl_expr = parse(
+    "λxs.rfold xs (λx acc.(leq x acc) x acc) (head xs)",
+    known={"rfold", "leq", "head"}
+)
+maxl_expr = parse(
+    "λxs.rfold xs (λx acc.(leq x acc) acc x) (head xs)",
+    known={"rfold", "leq", "head"}
+)
 
 ### String manipulation primitives
 
@@ -332,6 +357,8 @@ id_expr = parse("λx.x")
 compose_expr = parse("λf g x.f (g x)")
 
 BUILTINS = {
+    "-inf": neg_inf_value,
+    "inf": inf_value,
     "True": true_expr,
     "False": false_expr,
     # arithmetic
@@ -366,6 +393,7 @@ BUILTINS = {
     "rfold": external_fn(builtin_rfold),
     "map": map_expr,
     "filter": filter_expr,
+    "reduce": reduce_expr,
     "zip": external_fn(builtin_zip),
     "length": external_fn(builtin_length),
     "range": external_fn(builtin_range),
@@ -376,6 +404,10 @@ BUILTINS = {
     "reverse": external_fn(builtin_reverse),
     "sort": external_fn(builtin_sort),
     "flatten": external_fn(builtin_flatten),
+    "min": min_expr,
+    "max": max_expr,
+    "minl": minl_expr,
+    "maxl": maxl_expr,
     # String manipulation
     "concat": external_fn(builtin_str_concat),
     "substr": external_fn(builtin_substring),
@@ -393,6 +425,8 @@ BUILTINS = {
 }
 
 BUILTIN_SCHEMES = {
+    "-inf":     parse_poly_type("Float"),
+    "inf":     parse_poly_type("Float"),
     # Arithmetic primitives
     "add":     parse_poly_type("T -> T -> T"),
     "+":       parse_poly_type("T -> T -> T"),
@@ -427,6 +461,7 @@ BUILTIN_SCHEMES = {
     "rfold":   parse_poly_type("List A -> (A -> B -> B) -> B -> B"),
     "map":     parse_poly_type("List A -> (A -> B) -> List B"),
     "filter":  parse_poly_type("List A -> (A -> Bool) -> List A"),
+    "reduce":  parse_poly_type("List T -> (ACC -> T -> ACC) -> ACC -> ACC"),
     "zip":     parse_poly_type("List T -> List T -> List (List T)"),
     "length":  parse_poly_type("List A -> Int"),
     "range":   parse_poly_type("Int -> Int -> List Int"),
@@ -437,6 +472,10 @@ BUILTIN_SCHEMES = {
     "reverse": parse_poly_type("List T -> List T"),
     "sort":    parse_poly_type("List T -> List T"),
     "flatten": parse_poly_type("List List T -> List T"),
+    "min":     parse_poly_type("T -> T -> T"),
+    "max":     parse_poly_type("T -> T -> T"),
+    "minl":    parse_poly_type("List T -> T"),
+    "maxl":    parse_poly_type("List T -> T"),
     # String manipulation
     "concat":  parse_poly_type("String -> String -> String"),
     "substr":  parse_poly_type("String -> Int -> Int -> String"),

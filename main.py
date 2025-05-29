@@ -1,19 +1,16 @@
-import regex
-import random
 import os
-import string
 
 def parse_args():
     import argparse
     # Create args object with the same parameters as the CLI script
     defaults = argparse.Namespace(
         # Model options
-        model_name="unsloth/Llama-3.2-3B-Instruct",
+        model_name="unsloth/DeepSeek-R1-0528-Qwen3-8B-unsloth-bnb-4bit",
         # Training options
         per_device_train_batch_size=4,
         gradient_accumulation_steps=2,
         warmup_steps=10,
-        max_steps=1000,
+        max_steps=5000,
         learning_rate=3e-4,
         optim="adamw_8bit",
         weight_decay=0.00,
@@ -41,113 +38,117 @@ def parse_args():
     return parser.parse_args()
 
 # Start with the assumption that no tokens are allowed.
-# 
+#
 def allowed_tokens(tokenizer, inputs_len):
     from synthwave.eval import KNOWN_VARS
+    from synthwave.parser import Modi
 
+    inv_vocab = {tid: tok for tok, tid in tokenizer.get_vocab().items()}
     term_to_ids = {}
-    v = tokenizer.get_vocab()
-    def compute_allowed(terms):
-        keep = set()
-        for term in terms:
-            if term in term_to_ids:
-                ids = term_to_ids[term]
-                keep.update(ids)
+    trie = {}
+
+    for tid, piece in inv_vocab.items():
+        if piece.startswith("<"):                  # skip specials
+            continue
+        node = trie
+        for ch in piece.lstrip(" \t\r\n").rstrip(" \t\r\n"):
+            node = node.setdefault(ch, {})
+            node.setdefault("_ids", []).append(tid)   # every prefix owns the id
+
+    def ids_for_literal(literal: str) -> list[int]:
+        if literal == ' ': # Edge case as we normally ignore whitespace
+            return tokenizer.encode(" ", add_special_tokens=False)
+        node = trie
+        for ch in literal.lstrip(" \t\r\n").rstrip(" \t\r\n"):
+            node = node.get(ch)
+            if node is None:
+                return []
+        return node["_ids"]
+
+    def compute_allowed(parsed, non_terms):
+        ids = set()
+
+        if parsed is not None:
+            ids.add(tokenizer.eos_token_id)
+
+        for term in non_terms:
+            if term.name in term_to_ids:
+                ids.update(term_to_ids[term.name])
                 continue
-            if term.name == "$END":
-                ids = [tokenizer.eos_token_id]
-            elif term.name == "LAMBDA":
-                ids = tokenizer.encode("lambda", add_special_tokens=False)
-            elif term.name == "BOOL":
-                ids = tokenizer.encode("TrueFalse", add_special_tokens=False)
-            elif term.name == "WS":
-                ids = tokenizer.encode(" ", add_special_tokens=False)
-            elif term.name == "IDENT1": # Ident for atom's
-                # Restrict identifiers to known variables
-                ids = []
-                for var in KNOWN_VARS:
-                    tokens = tokenizer.encode(var, add_special_tokens=False)
-                    ids.extend(tokens)
+
+            current = set()
+            if term.modi == Modi.Single:
+                for literal in term.tokens:
+                    # The exact token(s).
+                    current.update(tokenizer.encode(literal, add_special_tokens=False))
+                    # Tokens that start with the literal and only add blanks.
+                    # current.update(ids_for_literal(literal))
+            elif term.modi == Modi.Many:
+                for tid, piece in inv_vocab.items():
+                    # Skip special tokens (they start with '<')
+                    if piece.startswith("<"):
+                        continue
+                    if all(ch in term.tokens for ch in piece):
+                        ids.add(tid)
             else:
-                # Compute all matching tokens
-                regexpr = regex.compile(term.pattern.to_regexp())
-                # 1. Take all the matches, for each
-                # 2. Remove 1 char of the token's suffix
-                # 3. Check if it still matches the regex
-                # 4. If it does, remove original token from the vocab
-                matching = {}
-                for token, id in v.items():
-                    match = regexpr.fullmatch(token, partial=True)
-                    if not match:
-                        continue
-                    # Exact matches are preferred sometimes
-                    if not match.partial and term.name not in ["INTEGER"]:
-                        matching[token] = id
-                        continue
-                    # Find maybe a shorter token shortest match
-                    while len(token) > 1:
-                        if regexpr.fullmatch(token[:-1], partial=True):
-                            token = token[:-1]
-                    # We might of already seen a matching token
-                    if token in matching:
-                        # Take the smallest id I guess
-                        id = min(matching[token], id)
-                    matching[token] = id
-                ids = list(matching.values())
-            term_to_ids[term] = ids
-            keep.update(ids)
-        return list(sorted(keep))
+                raise NotImplementedError()
+            term_to_ids[term.name] = list(current)
+            ids.update(current)
+
+        return list(ids)
+
     def prefix_allowed_tokens_fn(_, input_ids):
         input = input_ids[inputs_len:]
         text = tokenizer.decode(input, skip_special_tokens=True)
-        terms = parse_inc(text, known=KNOWN_VARS)
-        x = compute_allowed(terms)
-        if len(input) == 0:
-            # Add begin <|begin_of_text|> token
-            x.extend(tokenizer.encode(""))
-        print(f"\rTokenizer restricted to {len(x):02} tokens: {text}", end='')
-        print([t.name for t in terms], end='')
+        parsed, next = parse_inc2(text, known=KNOWN_VARS)
+        x = compute_allowed(parsed, next)
+        print(f"prefix: '{text}' restricted: {[t.name for t in next]}")
+        print([ tokenizer.decode(y, skip_special_tokens=True) for y in x])
+        print("===")
         return x
     return prefix_allowed_tokens_fn
 
 def inference():
+    from datasetting import transform_to_messages
+
     print("Loading pretrained model. This may take a while...")
     model, tokenizer = synthwave.load_model(ARGS.model_name)
     print("Model loaded")
 
-    # assert tokenizer.is_fast
-    # tok_json = json.loads(tokenizer._tokenizer.to_str())
-    # print(tok_json)
-    # assert tok_json['model']['type'] == "BPE"
-    # Keep all single_length tokens
-    # indices = set(v for k, v in tokenizer.vocab.items() if len(k) == 1)
-    # print(indices)
+    tokenizer = get_chat_template(
+        tokenizer,
+        chat_template="qwen3",
+    )
 
-    prompt = f"""\
-[3, 9, 1, 5] -> [9, 5, 3, 1]
-[1, 3] -> [3, 1]
-[30, 10, 20] -> [30, 20, 10]\
-{tokenizer.eos_token}\
-"""
+    # respond literally: lambda x. reverse (sort x)
+    messages = transform_to_messages("""
+        [3, 9, 1, 5] -> [9, 5, 3, 1]
+        [1, 3] -> [3, 1]
+        [30, 10, 20] -> [30, 20, 10]
+    """.strip())
+    text = tokenizer.apply_chat_template(
+        messages,
+        tokenize=False,
+        add_generation_prompt=True, # Must add for generation
+        enable_thinking=False,
+    )
 
     print("Starting inference")
     with torch.no_grad():
-        inputs = tokenizer([prompt], return_tensors="pt").to(model.device)
+        inputs = tokenizer([text], return_tensors="pt").to(model.device)
         input_len = inputs['input_ids'].shape[-1]
         inputs.pop("token_type_ids", None)
 
         outputs = model.generate(
             **inputs,
-            max_new_tokens=50,
-            prefix_allowed_tokens_fn=allowed_tokens(tokenizer, input_len),
-            eos_token_id=tokenizer.eos_token_id,
+            max_new_tokens=64,
+            # prefix_allowed_tokens_fn=allowed_tokens(tokenizer, input_len),
             return_dict_in_generate=True,
-            use_cache=True,
             temperature = 1.0, top_p = 0.95, top_k = 64,
         )
         sequence = outputs['sequences'][0, input_len:]
         print("\nResponse:")
-        print(tokenizer.decode(sequence))
+        print(tokenizer.decode(sequence, skip_special_tokens=True))
 
 def train():
     from trl import GRPOConfig, GRPOTrainer
@@ -160,19 +161,18 @@ def train():
     model, tokenizer = synthwave.load_model(ARGS.model_name)
     print("Model loaded")
 
-    dataset = datasetting.transform("handcrafted", datasetting.handcrafted)
-
-    # Split into train/test with appropriate size for small dataset
-    # datasets = dataset.train_test_split(test_size=0.33)
-    # print(
-    #     f"Training examples: {len(datasets['train'])}, Test examples: {len(datasets['test'])}"
-    # )
+    train_dataset = datasetting.load_metaset3_dataset("train")
+    test_dataset = datasetting.load_metaset3_dataset("test")
 
     # Train model
     print("Starting training")
     model = get_peft_model(
         model,
-        r=256,
+        finetune_vision_layers     = False, # Turn off for just text!
+        finetune_language_layers   = True,  # Should leave on!
+        finetune_attention_modules = True,  # Attention good for GRPO
+        finetune_mlp_modules       = True,  # SHould leave on always!
+        r=24,
         lora_alpha=24,
         lora_dropout=0,
         bias="none",
@@ -186,10 +186,16 @@ def train():
     trainer = GRPOTrainer(
         model=model,
         processing_class=tokenizer,
-        reward_funcs=[rewards.valid_syntax, rewards.diverse_output],
+        reward_funcs=[
+            rewards.match_format_exactly,
+            rewards.match_format_approx,
+            rewards.valid_lambda_expr,
+            rewards.infers_type_correctly,
+            rewards.correct,
+        ],
         args=GRPOConfig(
             output_dir=str(MODEL_DIR / "finedtuned"),
-            use_vllm = True, 
+            # use_vllm=True,
             learning_rate=ARGS.learning_rate,
             weight_decay=ARGS.weight_decay,
             warmup_ratio=0.25,
@@ -199,67 +205,34 @@ def train():
             bf16=is_bfloat16_supported(),
             fp16=not is_bfloat16_supported(),
             per_device_train_batch_size=ARGS.per_device_train_batch_size,
-            gradient_accumulation_steps=ARGS.gradient_accumulation_steps, 
+            gradient_accumulation_steps=ARGS.gradient_accumulation_steps,
             # Decrease if out of memory
-            num_generations=8, 
+            num_generations=8,
             max_prompt_length=256,
             max_completion_length=64,
             # Set to 1 for a full training run
-            num_train_epochs=1, 
+            num_train_epochs=1,
             max_steps=ARGS.max_steps,
             save_steps=ARGS.steps_per_save,
             max_grad_norm=0.1,
-            # Can use Weights & Biases
-            report_to="none",
+            # Logging configuration
+            logging_dir=str(MODEL_DIR / "finedtuned" / "logs"),
+            logging_strategy="steps",
+            logging_steps=10,  # Log every 10 steps
+            logging_first_step=True,
+            log_completions=True,  # Log the actual completions during training
+            report_to="tensorboard",  # Enable TensorBoard logging
         ),
-        train_dataset=dataset,
-        # eval_dataset=datasets["test"],
+        train_dataset=train_dataset,
+        eval_dataset=test_dataset,
     )
     trainer.train()
     trainer.save_model()
     trainer.save_state()
 
 
-def weighted_choice(arr, alpha_weight=10):
-    from synthwave.parser import IDENT, DIGIT, BOOLEAN, LAMBDA, DOT, WS, Modi
-    non_terminal = random.choice(arr)
-    if non_terminal.modi == Modi.Many:
-        n = random.random() % 5 + 1
-        print(non_terminal.chars)
-        random.choices(non_terminal.chars, k=n)
-
-    # priority = string.ascii_letters + string.digits + "(" + ")" + "]" + "[" + "lambda" + "." + " "
-    # weights = [
-    #     alpha_weight if item in priority else 1
-    #     for item in arr
-    # ]
-    return random.choices(arr, weights=weights, k=1)[0]
-
 def main():
     from synthwave.eval import KNOWN_VARS
-    from synthwave.parser import parse_inc2
-
-    # for _ in range(10):
-    #     seq = ""
-    #     while True:
-    #         parsed, expect = parse_inc2(seq, known=KNOWN_VARS, strict=True)
-    #         if parsed:
-    #             if len(seq) < 10:
-    #                 seq = ""
-    #                 continue
-    #             print(seq)
-    #             print(parsed)
-    #             break
-    #         seq += weighted_choice(expect)
-
-    # print(parse_inc2("", known=KNOWN_VARS))
-    print(parse_inc2("add ", known=KNOWN_VARS))
-    # print(parse_inc2("add 1 ", known=KNOWN_VARS))
-    # print(parse_inc2("add 1 2 ", known=KNOWN_VARS))
-    # print(parse_inc2("map [", known=KNOWN_VARS))
-    # print(parse_inc2("if ", known=KNOWN_VARS))
-    # print(parse_inc2("(lambda ABC x.1)", known=KNOWN_VARS))
-    exit(1)
 
     if ARGS.repl:
         from synthwave import parse, evaluate, infer, pretty_print
@@ -274,10 +247,14 @@ def main():
                 print(f"  => {pretty_print(result)} :: {result_ty}")
             except Exception as e:
                 print(f"\033[91m{repr(e)}\033[0m")
+                raise e
     elif ARGS.train:
         train()
     elif ARGS.inference:
         inference()
+    else:
+        print("Unknown arg")
+        exit(1)
 
 
 if __name__ == "__main__":
@@ -288,7 +265,8 @@ if __name__ == "__main__":
         from unsloth import FastLanguageModel, is_bfloat16_supported, PatchFastRL
         PatchFastRL("GRPO", FastLanguageModel)
     # Later
-    from synthwave.parser import parse_inc
+    from unsloth.chat_templates import get_chat_template
+    from synthwave.parser import parse_inc2
     import synthwave
     import torch
     main()
