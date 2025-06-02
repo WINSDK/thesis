@@ -1,5 +1,7 @@
 from collections.abc import Callable
 from typing import Dict, Optional
+import functools
+import signal
 from .dsl import UOp, Ops, ExternalError, reduce_redundant
 from .helpers import fn_parameters
 from .parser import parse, parse_poly_type
@@ -143,6 +145,25 @@ def back_substitution(expr, env: Dict[str, UOp]):
         return expr
     return aux(expr)
 
+class TimeoutError(Exception): ...
+
+def timeout(seconds: int):
+    def decorator(fn):
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            def _raise(signum, frame):
+                raise TimeoutError(f"{fn.__name__} exceeded {seconds}s")
+            old_handler = signal.signal(signal.SIGALRM, _raise)
+            signal.setitimer(signal.ITIMER_REAL, seconds)
+            try:
+                return fn(*args, **kwargs)
+            finally:
+                signal.setitimer(signal.ITIMER_REAL, 0)
+                signal.signal(signal.SIGALRM, old_handler)
+        return wrapper
+    return decorator
+
+@timeout(5)
 def evaluate(expr: UOp, env: Optional[Dict[str, UOp]]=None):
     if env is None:
         env = {}
@@ -189,6 +210,8 @@ def builtin_mod(x, y):
 
 def builtin_pow(x, y):
     return x ** y
+
+abs_expr = parse("λx.(geq x 0) x (sub 0 x)", known={"geq", "sub"})
 
 ### Comparison primitives
 
@@ -374,6 +397,7 @@ BUILTINS = {
     "%"  : external_fn(builtin_mod),
     "pow": external_fn(builtin_pow),
     "**" : external_fn(builtin_pow),
+    "abs" : abs_expr,
     # Comparisons
     "if": if_expr,
     "eq": external_fn(builtin_eq),
@@ -440,6 +464,7 @@ BUILTIN_SCHEMES = {
     "%":       parse_poly_type("T -> T -> T"),
     "pow":     parse_poly_type("T -> T -> T"),
     "**":      parse_poly_type("T -> T -> T"),
+    "abs":     parse_poly_type("T -> T"),
     # Comparisons
     "if":      parse_poly_type("T -> A -> B"),
     "eq":      parse_poly_type("T -> T -> Bool"),
